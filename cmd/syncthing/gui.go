@@ -135,6 +135,7 @@ func (s *apiSvc) Serve() {
 	getRestMux.HandleFunc("/rest/db/need", s.getDBNeed)                          // folder [perpage] [page]
 	getRestMux.HandleFunc("/rest/db/status", s.getDBStatus)                      // folder
 	getRestMux.HandleFunc("/rest/db/browse", s.getDBBrowse)                      // folder [prefix] [dirsonly] [levels]
+	getRestMux.HandleFunc("/rest/db/selections", s.getSelections)                // folder [tree]
 	getRestMux.HandleFunc("/rest/events", s.getEvents)                           // since [limit]
 	getRestMux.HandleFunc("/rest/stats/device", s.getDeviceStats)                // -
 	getRestMux.HandleFunc("/rest/stats/folder", s.getFolderStats)                // -
@@ -916,6 +917,41 @@ func (s *apiSvc) getSystemBrowse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	json.NewEncoder(w).Encode(ret)
+}
+
+func (s *apiSvc) getSelections(w http.ResponseWriter, r *http.Request) {
+	qs := r.URL.Query()
+
+	data, err := s.model.GetSelections(qs.Get("folder"), qs.Get("tree") != "")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(data)
+}
+
+func (s *apiSvc) postSelections(w http.ResponseWriter, r *http.Request) {
+	qs := r.URL.Query()
+
+	var data map[string][]string
+	err := json.NewDecoder(r.Body).Decode(&data)
+	r.Body.Close()
+
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	err = s.model.SetSelections(qs.Get("folder"), data["patterns"], qs.Get("remove") != "")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(data)
 }
 
 type embeddedStatic struct {

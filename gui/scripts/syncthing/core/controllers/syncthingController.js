@@ -47,6 +47,7 @@ angular.module('syncthing.core')
         $scope.neededPageSize = 10;
         $scope.foldersTotalLocalBytes = 0;
         $scope.foldersTotalLocalFiles = 0;
+        $scope.existingSelections = [];
 
         $(window).bind('beforeunload', function () {
             navigatingAway = true;
@@ -1059,6 +1060,8 @@ angular.module('syncthing.core')
             $scope.currentFolder.staggeredVersionsPath = "";
             $scope.currentFolder.externalCommand = "";
             $scope.currentFolder.autoNormalize = true;
+            $scope.currentFolder.selectiveEnabled = false;
+
             $scope.editingExisting = false;
             $scope.folderEditor.$setPristine();
             $('#editFolder').modal();
@@ -1080,6 +1083,16 @@ angular.module('syncthing.core')
                 autoNormalize: true
             };
             $scope.currentFolder.selectedDevices[device] = true;
+
+            $scope.currentFolder.rescanIntervalS = 60;
+            $scope.currentFolder.fileVersioningSelector = "none";
+            $scope.currentFolder.simpleKeep = 5;
+            $scope.currentFolder.staggeredMaxAge = 365;
+            $scope.currentFolder.staggeredCleanInterval = 3600;
+            $scope.currentFolder.staggeredVersionsPath = "";
+            $scope.currentFolder.externalCommand = "";
+            $scope.currentFolder.autoNormalize = true;
+            $scope.currentFolder.selectiveEnabled = false;
 
             $scope.editingExisting = false;
             $scope.folderEditor.$setPristine();
@@ -1231,6 +1244,85 @@ angular.module('syncthing.core')
                 .then(function () {
                     $('#editIgnoresButton').removeAttr('disabled');
                 });
+        };
+
+        $scope.selectiveSync = function () {
+            if (!$scope.editingExisting) {
+                return;
+            }
+
+            $('#selectiveSyncButton').attr('disabled', 'disabled');
+
+            $http.get(urlbase + '/db/selections?tree=1&folder=' + encodeURIComponent($scope.currentFolder.id))
+                .success(function (selections) {
+                    $scope.existingSelections = selections.patterns;
+                    $('#selectiveSyncTree').jstree({
+                        plugins: ["checkbox"],
+                        core: {
+                            animation: 0,
+                            data: function (node, callback) {
+                                var parentID = node.id,
+                                    parentName = node.text,
+                                    url = urlbase + '/db/browse?dirsonly=1&levels=1&folder=' + encodeURIComponent($scope.currentFolder.id);
+
+                                if (parentID == "#") {
+                                    if (selections.tree) {
+                                        callback(selections.tree);
+                                        return;
+                                    }
+                                    parentID = "";
+                                    parentName = $scope.currentFolder.id;
+                                } else {
+                                    url += "&prefix=" + encodeURIComponent(parentID);
+                                }
+
+                                $http.get(url)
+                                    .success(function (data) {
+                                        data = buildDirectoryChildren(parentID, parentName, data);
+                                        callback(data);
+                                    });
+                            }
+                        },
+                        checkbox: {
+                            keep_selected_style: false
+                        },
+                    }).on('ready.jstree', function () {
+                        $('#selectiveSyncButton').removeAttr('disabled');
+                        $('#editFolder').modal('hide');
+                        $('#selectiveSync').modal()
+                            .on('hidden.bs.modal', function () {
+                                $('#editFolder').modal();
+                                $('#selectiveSyncTree').jstree('destroy');
+                            });
+
+                        $scope.existingSelections.forEach(function (selection) {
+                            $('#selectiveSyncTree').jstree('select_node', selection);
+                        });
+                    });
+                }).error(function () {
+                    $('#selectiveSyncButton').removeAttr('disabled');
+                });
+        };
+
+        $scope.saveSelectiveSync = function (remove) {
+            remove = remove ? "&remove=1" : "";
+            var selections = $('#selectiveSyncTree').jstree('get_top_selected');
+
+            // Merge new selections and old selections (because old selections
+            // might be valid, but we just don't have them at the moment due
+            // to lack of persistent indexes).
+            selections.forEach(function (selection) {
+                if ($scope.existingSelections.indexOf(selection) == -1) {
+                    $scope.existingSelections.push(selection);
+                }
+            });
+
+            if ($scope.folders[$scope.currentFolder.id].selectiveEnabled != $scope.currentFolder.selectiveEnabled) {
+                 $scope.saveFolder();
+            }
+            $http.post(urlbase + '/db/selections?folder=' + encodeURIComponent($scope.currentFolder.id) + remove, {
+                patterns: $scope.existingSelections
+            });
         };
 
         $scope.saveIgnores = function () {
