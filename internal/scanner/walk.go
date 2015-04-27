@@ -19,6 +19,7 @@ import (
 	"github.com/syncthing/syncthing/internal/db"
 	"github.com/syncthing/syncthing/internal/ignore"
 	"github.com/syncthing/syncthing/internal/osutil"
+	"github.com/syncthing/syncthing/internal/pruner"
 	"github.com/syncthing/syncthing/internal/symlinks"
 	"golang.org/x/text/unicode/norm"
 )
@@ -47,6 +48,8 @@ type Walker struct {
 	BlockSize int
 	// If Matcher is not nil, it is used to identify files to ignore which were specified by the user.
 	Matcher *ignore.Matcher
+	// Pruner used to identify subdirectories which to sync.
+	Pruner *pruner.Pruner
 	// If TempNamer is not nil, it is used to ignore temporary files when walking.
 	TempNamer TempNamer
 	// Number of hours to keep temporary files for
@@ -84,7 +87,7 @@ type CurrentFiler interface {
 // file system. Files are blockwise hashed.
 func (w *Walker) Walk() (chan protocol.FileInfo, error) {
 	if debug {
-		l.Debugln("Walk", w.Dir, w.Subs, w.BlockSize, w.Matcher)
+		l.Debugln("Walk", w.Dir, w.Subs, w.BlockSize, w.Matcher, w.Pruner)
 	}
 
 	err := checkDir(w.Dir)
@@ -166,6 +169,14 @@ func (w *Walker) walkAndHashFiles(fchan chan protocol.FileInfo) filepath.WalkFun
 			if debug {
 				l.Debugln("ignored:", rn)
 			}
+			return skip
+		}
+
+		if !info.IsDir() || info.Mode()&os.ModeSymlink == os.ModeSymlink {
+			if w.Pruner.ShouldSkipFile(rn) {
+				return skip
+			}
+		} else if w.Pruner.ShouldSkipDirectory(rn) {
 			return skip
 		}
 
