@@ -1784,7 +1784,7 @@ func (m *Model) ResetFolder(folder string) error {
 	return fmt.Errorf("Unknown folder %q", folder)
 }
 
-// Set selective sync patterns
+// SetSelections sets patterns for selective sync
 func (m *Model) SetSelections(folder string, selections []string, remove bool) error {
 	m.fmut.RLock()
 	cfg, ok := m.cfg.Folders()[folder]
@@ -1822,8 +1822,7 @@ func (m *Model) SetSelections(folder string, selections []string, remove bool) e
 	ignores := m.folderIgnores[folder]
 	m.fmut.RUnlock()
 
-	toRemove := make([]string, 0)
-
+	var toRemove []string
 	files.WithHaveTruncated(protocol.LocalDeviceID, func(fi db.FileIntf) bool {
 		f := fi.(db.FileInfoTruncated)
 		if pruner.ShouldSkipTruncated(f) && !ignores.Match(f.Name) {
@@ -1840,15 +1839,15 @@ func (m *Model) SetSelections(folder string, selections []string, remove bool) e
 
 type jsTreeNode struct {
 	Text     string      `json:"text"`
-	Id       string      `json:"id"`
+	ID       string      `json:"id"`
 	Children interface{} `json:"children"`
 	Icon     string      `json:"icon"`
 	Edge     bool        `json:"-"`
 }
 
-// Get selective sync selection patterns. If tree flag is set, it will also
-// produce a tree to be consumed by jsTree library so that the amount of work
-// to be done in the browser would be minimal.
+// GetSelections returns the selective sync patterns. If tree flag is set, it
+// will also produce a tree to be consumed by jsTree library so that the
+// amount of work to be done in the browser would be minimal.
 func (m *Model) GetSelections(folder string, tree bool) (map[string]interface{}, error) {
 	m.fmut.RLock()
 	cfg, okc := m.folderCfgs[folder]
@@ -1902,7 +1901,7 @@ func (m *Model) GetSelections(folder string, tree bool) (map[string]interface{},
 		//    with us (hitting scenario 3) and become edge nodes.
 
 		// Both types reference pointers, as the underlying structs might change.
-		roots := make([]*jsTreeNode, 0)
+		var roots []*jsTreeNode
 		// Quickly accesso parents
 		nodes := make(map[string]*jsTreeNode)
 
@@ -1925,7 +1924,7 @@ func (m *Model) GetSelections(folder string, tree bool) (map[string]interface{},
 
 			// Store the parent here, in case we look it up in the else
 			// branch while 'optimizing'.
-			var par *jsTreeNode = nil
+			var par *jsTreeNode
 
 			if parent == "." {
 				// There is no parent, hence we are at the root.
@@ -1985,7 +1984,7 @@ func (m *Model) GetSelections(folder string, tree bool) (map[string]interface{},
 
 			self := jsTreeNode{
 				Text: filepath.Base(name),
-				Id:   name,
+				ID:   name,
 				Icon: "glyphicon glyphicon-folder-open",
 			}
 			if selfMatch {
@@ -2030,7 +2029,7 @@ func (m *Model) GetSelections(folder string, tree bool) (map[string]interface{},
 			if len(children) == 0 {
 				children = append(children, &jsTreeNode{
 					Text:     "Files in \"" + filepath.Base(parent) + "\"",
-					Id:       par.Id + "/[^/]+",
+					ID:       par.ID + "/[^/]+",
 					Children: nil,
 					Icon:     "glyphicon glyphicon-file",
 				})
