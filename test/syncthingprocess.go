@@ -156,9 +156,6 @@ func (p *syncthingProcess) stop() (*os.ProcessState, error) {
 func (p *syncthingProcess) get(path string) (*http.Response, error) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-		},
 	}
 	req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d%s", p.port, path), nil)
 	if err != nil {

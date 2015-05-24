@@ -332,6 +332,10 @@ func benchmarkURL(b *testing.B, url string) {
 		if resp.StatusCode != 200 {
 			b.Fatal(resp.Status)
 		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			b.Fatal(err)
+		}
 		resp.Body.Close()
 	}
 }
