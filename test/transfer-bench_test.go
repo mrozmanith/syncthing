@@ -11,6 +11,7 @@ package integration
 import (
 	"log"
 	"os"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -154,8 +155,11 @@ loop:
 		time.Sleep(250 * time.Millisecond)
 	}
 
-	sender.stop()
-	proc, err := receiver.stop()
+	sendProc, err := sender.stop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recvProc, err := receiver.stop()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,9 +178,24 @@ loop:
 	log.Println("Result: Wall time:", t1.Sub(t0))
 	log.Printf("Result: %.1f MiB/s synced", float64(total)/1024/1024/t1.Sub(t0).Seconds())
 
-	if rusage, ok := proc.SysUsage().(*syscall.Rusage); ok {
-		log.Println("Result: Utime:", time.Duration(rusage.Utime.Nano()))
-		log.Println("Result: Stime:", time.Duration(rusage.Stime.Nano()))
-		log.Println("Result: MaxRSS:", rusage.Maxrss/1024, "KiB")
+	if rusage, ok := recvProc.SysUsage().(*syscall.Rusage); ok {
+		log.Println("Receiver: Utime:", time.Duration(rusage.Utime.Nano()))
+		log.Println("Receiver: Stime:", time.Duration(rusage.Stime.Nano()))
+		if runtime.GOOS == "darwin" {
+			// Darwin reports in bytes, Linux seems to report in KiB even
+			// though the manpage says otherwise.
+			rusage.Maxrss /= 1024
+		}
+		log.Println("Receiver: MaxRSS:", rusage.Maxrss, "KiB")
+	}
+	if rusage, ok := sendProc.SysUsage().(*syscall.Rusage); ok {
+		log.Println("Sender: Utime:", time.Duration(rusage.Utime.Nano()))
+		log.Println("Sender: Stime:", time.Duration(rusage.Stime.Nano()))
+		if runtime.GOOS == "darwin" {
+			// Darwin reports in bytes, Linux seems to report in KiB even
+			// though the manpage says otherwise.
+			rusage.Maxrss /= 1024
+		}
+		log.Println("Sender: MaxRSS:", rusage.Maxrss, "KiB")
 	}
 }
