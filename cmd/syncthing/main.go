@@ -654,6 +654,13 @@ func syncthingMain() {
 		l.Fatalln("Bad listen address:", err)
 	}
 
+	// Start the relevant services
+
+	connectionSvc := newConnectionSvc(cfg, myID, m, tlsCfg)
+	relaySvc := newRelaySvc(cfg, tlsCfg, connectionSvc.conns)
+	connectionSvc.Add(relaySvc)
+	mainSvc.Add(connectionSvc)
+
 	// Start discovery
 
 	localPort := addr.Port
@@ -666,10 +673,6 @@ func syncthingMain() {
 		upnpSvc := newUPnPSvc(cfg, localPort)
 		mainSvc.Add(upnpSvc)
 	}
-
-	connectionSvc := newConnectionSvc(cfg, myID, m, tlsCfg)
-	cfg.Subscribe(connectionSvc)
-	mainSvc.Add(connectionSvc)
 
 	if cpuProfile {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.pprof", os.Getpid()))
