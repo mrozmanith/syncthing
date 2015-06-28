@@ -86,10 +86,9 @@ type Model struct {
 	folderStatRefs map[string]*stats.FolderStatisticsReference            // folder -> statsRef
 	fmut           sync.RWMutex                                           // protects the above
 
-	protoConn map[protocol.DeviceID]protocol.Connection
-	rawConn   map[protocol.DeviceID]io.Closer
+	conn      map[protocol.DeviceID]Connection
 	deviceVer map[protocol.DeviceID]string
-	pmut      sync.RWMutex // protects protoConn and rawConn
+	pmut      sync.RWMutex // protects conn and deviceVer
 
 	started bool
 
@@ -130,8 +129,7 @@ func NewModel(cfg *config.Wrapper, id protocol.DeviceID, deviceName, clientName,
 		folderIgnores:      make(map[string]*ignore.Matcher),
 		folderRunners:      make(map[string]service),
 		folderStatRefs:     make(map[string]*stats.FolderStatisticsReference),
-		protoConn:          make(map[protocol.DeviceID]protocol.Connection),
-		rawConn:            make(map[protocol.DeviceID]io.Closer),
+		conn:               make(map[protocol.DeviceID]Connection),
 		deviceVer:          make(map[protocol.DeviceID]string),
 		reqValidationCache: make(map[string]time.Time),
 
@@ -239,14 +237,14 @@ func (m *Model) ConnectionStats() map[string]interface{} {
 	m.fmut.RLock()
 
 	var res = make(map[string]interface{})
-	conns := make(map[string]ConnectionInfo, len(m.protoConn))
-	for device, conn := range m.protoConn {
+	conns := make(map[string]ConnectionInfo, len(m.conn))
+	for device, conn := range m.conn {
 		ci := ConnectionInfo{
 			Statistics:    conn.Statistics(),
 			ClientVersion: m.deviceVer[device],
 		}
-		if nc, ok := m.rawConn[device].(remoteAddrer); ok {
-			ci.Address = nc.RemoteAddr().String()
+		if addr := m.conn[device].RemoteAddr(); addr != nil {
+			ci.Address = addr.String()
 		}
 
 		conns[device.String()] = ci
@@ -582,8 +580,11 @@ func (m *Model) ClusterConfig(deviceID protocol.DeviceID, cm protocol.ClusterCon
 		"clientVersion": cm.ClientVersion,
 	}
 
-	if conn, ok := m.rawConn[deviceID].(*tls.Conn); ok {
-		event["addr"] = conn.RemoteAddr().String()
+	if conn, ok := m.conn[deviceID]; ok {
+		addr := conn.RemoteAddr()
+		if addr != nil {
+			event["addr"] = addr.String()
+		}
 	}
 
 	m.pmut.Unlock()
@@ -689,12 +690,11 @@ func (m *Model) Close(device protocol.DeviceID, err error) {
 	}
 	m.fmut.RUnlock()
 
-	conn, ok := m.rawConn[device]
+	conn, ok := m.conn[device]
 	if ok {
 		closeRawConn(conn)
 	}
-	delete(m.protoConn, device)
-	delete(m.rawConn, device)
+	delete(m.conn, device)
 	delete(m.deviceVer, device)
 	m.pmut.Unlock()
 }
@@ -864,7 +864,7 @@ func (cf cFiler) CurrentFile(file string) (protocol.FileInfo, bool) {
 // ConnectedTo returns true if we are connected to the named device.
 func (m *Model) ConnectedTo(deviceID protocol.DeviceID) bool {
 	m.pmut.RLock()
-	_, ok := m.protoConn[deviceID]
+	_, ok := m.conn[deviceID]
 	m.pmut.RUnlock()
 	if ok {
 		m.deviceWasSeen(deviceID)
@@ -931,28 +931,24 @@ func (m *Model) SetIgnores(folder string, content []string) error {
 // AddConnection adds a new peer connection to the model. An initial index will
 // be sent to the connected peer, thereafter index updates whenever the local
 // folder changes.
-func (m *Model) AddConnection(rawConn io.Closer, protoConn protocol.Connection) {
-	deviceID := protoConn.ID()
+func (m *Model) AddConnection(conn Connection) {
+	deviceID := conn.ID()
 
 	m.pmut.Lock()
-	if _, ok := m.protoConn[deviceID]; ok {
+	if _, ok := m.conn[deviceID]; ok {
 		panic("add existing device")
 	}
-	m.protoConn[deviceID] = protoConn
-	if _, ok := m.rawConn[deviceID]; ok {
-		panic("add existing device")
-	}
-	m.rawConn[deviceID] = rawConn
+	m.conn[deviceID] = conn
 
-	protoConn.Start()
+	conn.Start()
 
 	cm := m.clusterConfig(deviceID)
-	protoConn.ClusterConfig(cm)
+	conn.ClusterConfig(cm)
 
 	m.fmut.RLock()
 	for _, folder := range m.deviceFolders[deviceID] {
 		fs := m.folderFiles[folder]
-		go sendIndexes(protoConn, folder, fs, m.folderIgnores[folder])
+		go sendIndexes(conn, folder, fs, m.folderIgnores[folder])
 	}
 	m.fmut.RUnlock()
 	m.pmut.Unlock()
@@ -1106,7 +1102,7 @@ func (m *Model) updateLocals(folder string, fs []protocol.FileInfo) {
 
 func (m *Model) requestGlobal(deviceID protocol.DeviceID, folder, name string, offset int64, size int, hash []byte, flags uint32, options []protocol.Option) ([]byte, error) {
 	m.pmut.RLock()
-	nc, ok := m.protoConn[deviceID]
+	nc, ok := m.conn[deviceID]
 	m.pmut.RUnlock()
 
 	if !ok {
@@ -1630,7 +1626,7 @@ func (m *Model) Availability(folder, file string) []protocol.DeviceID {
 
 	availableDevices := []protocol.DeviceID{}
 	for _, device := range fs.Availability(file) {
-		_, ok := m.protoConn[device]
+		_, ok := m.conn[device]
 		if ok {
 			availableDevices = append(availableDevices, device)
 		}
@@ -1779,7 +1775,7 @@ func (m *Model) CommitConfiguration(from, to config.Configuration) bool {
 				// disconnect it so that we start sharing the folder with it.
 				// We close the underlying connection and let the normal error
 				// handling kick in to clean up and reconnect.
-				if conn, ok := m.rawConn[dev]; ok {
+				if conn, ok := m.conn[dev]; ok {
 					closeRawConn(conn)
 				}
 
