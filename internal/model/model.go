@@ -777,26 +777,8 @@ func (m *Model) Request(deviceID protocol.DeviceID, folder, name string, offset 
 			return nil, protocol.ErrNoSuchFile
 		}
 
-		// This call is really expensive for large files, as we load the full
-		// block list which may be megabytes and megabytes of data to allocate
-		// space for, read, and deserialize.
-		lf, ok := folderFiles.Get(protocol.LocalDeviceID, name)
-		if !ok {
-			return nil, protocol.ErrNoSuchFile
-		}
-
-		if lf.IsInvalid() || lf.IsDeleted() {
-			if debug {
-				l.Debugf("%v REQ(in): %s: %q / %q o=%d s=%d; invalid: %v", m, deviceID, folder, name, offset, size, lf)
-			}
-			return nil, protocol.ErrInvalid
-		}
-
-		if offset > lf.Size() {
-			if debug {
-				l.Debugf("%v REQ(in; nonexistent): %s: %q o=%d s=%d", m, deviceID, name, offset, size)
-			}
-			return nil, protocol.ErrNoSuchFile
+		if !folderFiles.Exists(protocol.LocalDeviceID, name) {
+			return nil, fmt.Errorf("file does not exist")
 		}
 
 		m.rvmut.Lock()
@@ -815,6 +797,7 @@ func (m *Model) Request(deviceID protocol.DeviceID, folder, name string, offset 
 	if debug && deviceID != protocol.LocalDeviceID {
 		l.Debugf("%v REQ(in): %s: %q / %q o=%d s=%d", m, deviceID, folder, name, offset, size)
 	}
+
 	m.fmut.RLock()
 	fn := filepath.Join(m.folderCfgs[folder].Path(), name)
 	m.fmut.RUnlock()

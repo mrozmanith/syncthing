@@ -662,6 +662,18 @@ func ldbGet(db *leveldb.DB, folder, device, file []byte) (protocol.FileInfo, boo
 	return f, true
 }
 
+func ldbExists(db *leveldb.DB, folder, device, file []byte) bool {
+	nk := deviceKey(folder, device, file)
+	_, err := db.Get(nk, nil)
+	if err == leveldb.ErrNotFound {
+		return false
+	}
+	if err != nil {
+		panic(err)
+	}
+	return true
+}
+
 func ldbGetGlobal(db *leveldb.DB, folder, file []byte, truncate bool) (FileIntf, bool) {
 	k := globalKey(folder, file)
 	snap, err := db.GetSnapshot()

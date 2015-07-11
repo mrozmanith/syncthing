@@ -184,6 +184,10 @@ func (s *FileSet) Get(device protocol.DeviceID, file string) (protocol.FileInfo,
 	return f, ok
 }
 
+func (s *FileSet) Exists(device protocol.DeviceID, file string) bool {
+	return ldbExists(s.db, []byte(s.folder), device[:], []byte(osutil.NormalizedFilename(file)))
+}
+
 func (s *FileSet) GetGlobal(file string) (protocol.FileInfo, bool) {
 	fi, ok := ldbGetGlobal(s.db, []byte(s.folder), []byte(osutil.NormalizedFilename(file)), false)
 	if !ok {

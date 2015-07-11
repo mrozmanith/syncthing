@@ -127,7 +127,10 @@ func TestRequest(t *testing.T) {
 	}
 
 	// Shared folder, but disallowed file name
-	bs, err = m.Request(device1, "default", "../walk.go", 0, 6, nil, 0, nil)
+	if _, err := os.Stat("testdata/../model_test.go"); err != nil {
+		t.Fatal("file must exist for test to be meaningful")
+	}
+	bs, err = m.Request(device1, "default", "../model_test.go", 0, 6, nil, 0, nil)
 	if err == nil {
 		t.Error("Unexpected nil error on insecure file read")
 	}
