@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/syncthing/protocol"
+	"github.com/syncthing/syncthing/internal/folder"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -447,10 +448,10 @@ func convertV5V6(cfg *Configuration) {
 	// Added ".stfolder" file at folder roots to identify mount issues
 	// Doesn't affect the config itself, but uses config migrations to identify
 	// the migration point.
-	for _, folder := range Wrap("", *cfg).Folders() {
+	for _, folderCfg := range Wrap("", *cfg).Folders() {
 		// Best attempt, if it fails, it fails, the user will have to fix
 		// it up manually, as the repo will not get started.
-		folder.CreateMarker()
+		folder.New(folderCfg.ID, folderCfg.RawPath).CreateMarker()
 	}
 
 	cfg.Version = 6

@@ -27,6 +27,7 @@ import (
 	"github.com/syncthing/syncthing/internal/config"
 	"github.com/syncthing/syncthing/internal/db"
 	"github.com/syncthing/syncthing/internal/events"
+	"github.com/syncthing/syncthing/internal/folder"
 	"github.com/syncthing/syncthing/internal/ignore"
 	"github.com/syncthing/syncthing/internal/osutil"
 	"github.com/syncthing/syncthing/internal/scanner"
@@ -77,6 +78,7 @@ type Model struct {
 	clientName    string
 	clientVersion string
 
+	folders        map[string]*folder.Folder
 	folderCfgs     map[string]config.FolderConfiguration                  // folder -> cfg
 	folderFiles    map[string]*db.FileSet                                 // folder -> files
 	folderDevices  map[string][]protocol.DeviceID                         // folder -> deviceIDs
@@ -123,6 +125,7 @@ func NewModel(cfg *config.Wrapper, id protocol.DeviceID, deviceName, clientName,
 		deviceName:         deviceName,
 		clientName:         clientName,
 		clientVersion:      clientVersion,
+		folders:            make(map[string]*folder.Folder),
 		folderCfgs:         make(map[string]config.FolderConfiguration),
 		folderFiles:        make(map[string]*db.FileSet),
 		folderDevices:      make(map[string][]protocol.DeviceID),
@@ -159,19 +162,22 @@ func (m *Model) StartDeadlockDetector(timeout time.Duration) {
 // StartFolderRW starts read/write processing on the current model. When in
 // read/write mode the model will attempt to keep in sync with the cluster by
 // pulling needed files from peer devices.
-func (m *Model) StartFolderRW(folder string) {
+func (m *Model) StartFolderRW(folderID string) {
 	m.fmut.Lock()
-	cfg, ok := m.folderCfgs[folder]
+	cfg, ok := m.folderCfgs[folderID]
 	if !ok {
-		panic("cannot start nonexistent folder " + folder)
+		panic("cannot start nonexistent folder " + folderID)
 	}
 
-	_, ok = m.folderRunners[folder]
+	_, ok = m.folderRunners[folderID]
 	if ok {
-		panic("cannot start already running folder " + folder)
+		panic("cannot start already running folder " + folderID)
 	}
+
+	folder := m.folders[folderID]
+
 	p := newRWFolder(m, m.shortID, cfg)
-	m.folderRunners[folder] = p
+	m.folderRunners[folderID] = p
 	m.fmut.Unlock()
 
 	if len(cfg.Versioning.Type) > 0 {
@@ -180,7 +186,7 @@ func (m *Model) StartFolderRW(folder string) {
 			l.Fatalf("Requested versioning type %q that does not exist", cfg.Versioning.Type)
 		}
 
-		versioner := factory(folder, cfg.Path(), cfg.Versioning.Params)
+		versioner := factory(folderID, folder.Path, cfg.Versioning.Params)
 		if service, ok := versioner.(suture.Service); ok {
 			// The versioner implements the suture.Service interface, so
 			// expects to be run in the background in addition to being called
@@ -817,7 +823,7 @@ func (m *Model) Request(deviceID protocol.DeviceID, folder, name string, offset 
 		l.Debugf("%v REQ(in): %s: %q / %q o=%d s=%d", m, deviceID, folder, name, offset, size)
 	}
 	m.fmut.RLock()
-	fn := filepath.Join(m.folderCfgs[folder].Path(), name)
+	fn := filepath.Join(m.folders[folder].Path, name)
 	m.fmut.RUnlock()
 
 	var reader io.ReaderAt
@@ -898,17 +904,17 @@ func (m *Model) ConnectedTo(deviceID protocol.DeviceID) bool {
 	return ok
 }
 
-func (m *Model) GetIgnores(folder string) ([]string, []string, error) {
+func (m *Model) GetIgnores(folderID string) ([]string, []string, error) {
 	var lines []string
 
 	m.fmut.RLock()
-	cfg, ok := m.folderCfgs[folder]
+	folder, ok := m.folders[folderID]
 	m.fmut.RUnlock()
 	if !ok {
-		return lines, nil, fmt.Errorf("Folder %s does not exist", folder)
+		return lines, nil, fmt.Errorf("Folder %s does not exist", folderID)
 	}
 
-	fd, err := os.Open(filepath.Join(cfg.Path(), ".stignore"))
+	fd, err := os.Open(filepath.Join(folder.Path, ".stignore"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return lines, nil, nil
@@ -924,19 +930,21 @@ func (m *Model) GetIgnores(folder string) ([]string, []string, error) {
 	}
 
 	m.fmut.RLock()
-	patterns := m.folderIgnores[folder].Patterns()
+	patterns := m.folderIgnores[folderID].Patterns()
 	m.fmut.RUnlock()
 
 	return lines, patterns, nil
 }
 
-func (m *Model) SetIgnores(folder string, content []string) error {
-	cfg, ok := m.folderCfgs[folder]
+func (m *Model) SetIgnores(folderID string, content []string) error {
+	m.fmut.RLock()
+	folder, ok := m.folders[folderID]
+	m.fmut.RUnlock()
 	if !ok {
-		return fmt.Errorf("Folder %s does not exist", folder)
+		return fmt.Errorf("Folder %s does not exist", folderID)
 	}
 
-	fd, err := ioutil.TempFile(cfg.Path(), ".syncthing.stignore-"+folder)
+	fd, err := ioutil.TempFile(folder.Path, ".syncthing.stignore-"+folderID)
 	if err != nil {
 		l.Warnln("Saving .stignore:", err)
 		return err
@@ -957,7 +965,7 @@ func (m *Model) SetIgnores(folder string, content []string) error {
 		return err
 	}
 
-	file := filepath.Join(cfg.Path(), ".stignore")
+	file := filepath.Join(folder.Path, ".stignore")
 	err = osutil.Rename(fd.Name(), file)
 	if err != nil {
 		l.Warnln("Saving .stignore:", err)
@@ -1168,6 +1176,7 @@ func (m *Model) AddFolder(cfg config.FolderConfiguration) {
 	}
 
 	m.fmut.Lock()
+	m.folders[cfg.ID] = folder.New(cfg.ID, cfg.RawPath)
 	m.folderCfgs[cfg.ID] = cfg
 	m.folderFiles[cfg.ID] = db.NewFileSet(cfg.ID, m.db)
 
