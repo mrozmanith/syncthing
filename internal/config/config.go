@@ -14,13 +14,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/syncthing/protocol"
-	"github.com/syncthing/syncthing/internal/osutil"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -90,56 +88,6 @@ func (f FolderConfiguration) Copy() FolderConfiguration {
 	c.Devices = make([]FolderDeviceConfiguration, len(f.Devices))
 	copy(c.Devices, f.Devices)
 	return c
-}
-
-func (f FolderConfiguration) Path() string {
-	// This is intentionally not a pointer method, because things like
-	// cfg.Folders["default"].Path() should be valid.
-
-	// Attempt tilde expansion; leave unchanged in case of error
-	if path, err := osutil.ExpandTilde(f.RawPath); err == nil {
-		f.RawPath = path
-	}
-
-	// Attempt absolutification; leave unchanged in case of error
-	if !filepath.IsAbs(f.RawPath) {
-		// Abs() looks like a fairly expensive syscall on Windows, while
-		// IsAbs() is a whole bunch of string mangling. I think IsAbs() may be
-		// somewhat faster in the general case, hence the outer if...
-		if path, err := filepath.Abs(f.RawPath); err == nil {
-			f.RawPath = path
-		}
-	}
-
-	// Attempt to enable long filename support on Windows. We may still not
-	// have an absolute path here if the previous steps failed.
-	if runtime.GOOS == "windows" && filepath.IsAbs(f.RawPath) && !strings.HasPrefix(f.RawPath, `\\`) {
-		return `\\?\` + f.RawPath
-	}
-
-	return f.RawPath
-}
-
-func (f *FolderConfiguration) CreateMarker() error {
-	if !f.HasMarker() {
-		marker := filepath.Join(f.Path(), ".stfolder")
-		fd, err := os.Create(marker)
-		if err != nil {
-			return err
-		}
-		fd.Close()
-		osutil.HideFile(marker)
-	}
-
-	return nil
-}
-
-func (f *FolderConfiguration) HasMarker() bool {
-	_, err := os.Stat(filepath.Join(f.Path(), ".stfolder"))
-	if err != nil {
-		return false
-	}
-	return true
 }
 
 func (f *FolderConfiguration) DeviceIDs() []protocol.DeviceID {

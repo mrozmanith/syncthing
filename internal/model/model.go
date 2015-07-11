@@ -1688,66 +1688,6 @@ func (m *Model) BringToFront(folder, file string) {
 	}
 }
 
-// CheckFolderHealth checks the folder for common errors and returns the
-// current folder error, or nil if the folder is healthy.
-func (m *Model) CheckFolderHealth(id string) error {
-	folder, ok := m.cfg.Folders()[id]
-	if !ok {
-		return errors.New("folder does not exist")
-	}
-
-	fi, err := os.Stat(folder.Path())
-	if v, ok := m.CurrentLocalVersion(id); ok && v > 0 {
-		// Safety check. If the cached index contains files but the
-		// folder doesn't exist, we have a problem. We would assume
-		// that all files have been deleted which might not be the case,
-		// so mark it as invalid instead.
-		if err != nil || !fi.IsDir() {
-			err = errors.New("folder path missing")
-		} else if !folder.HasMarker() {
-			err = errors.New("folder marker missing")
-		}
-	} else if os.IsNotExist(err) {
-		// If we don't have any files in the index, and the directory
-		// doesn't exist, try creating it.
-		err = osutil.MkdirAll(folder.Path(), 0700)
-		if err == nil {
-			err = folder.CreateMarker()
-		}
-	} else if !folder.HasMarker() {
-		// If we don't have any files in the index, and the path does exist
-		// but the marker is not there, create it.
-		err = folder.CreateMarker()
-	}
-
-	m.fmut.RLock()
-	runner, runnerExists := m.folderRunners[folder.ID]
-	m.fmut.RUnlock()
-
-	var oldErr error
-	if runnerExists {
-		_, _, oldErr = runner.getState()
-	}
-
-	if err != nil {
-		if oldErr != nil && oldErr.Error() != err.Error() {
-			l.Infof("Folder %q error changed: %q -> %q", folder.ID, oldErr, err)
-		} else if oldErr == nil {
-			l.Warnf("Stopping folder %q - %v", folder.ID, err)
-		}
-		if runnerExists {
-			runner.setError(err)
-		}
-	} else if oldErr != nil {
-		l.Infof("Folder %q error is cleared, restarting", folder.ID)
-		if runnerExists {
-			runner.clearError()
-		}
-	}
-
-	return err
-}
-
 func (m *Model) ResetFolder(folder string) {
 	l.Infof("Cleaning data for folder %q", folder)
 	db.DropFolder(m.db, folder)
