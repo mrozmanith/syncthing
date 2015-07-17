@@ -109,6 +109,7 @@ var (
 	readRateLimit  *ratelimit.Bucket
 	stop           = make(chan int)
 	discoverer     *discover.Discoverer
+	relayer        *relaySvc
 	cert           tls.Certificate
 	lans           []*net.IPNet
 )
@@ -657,8 +658,8 @@ func syncthingMain() {
 	// Start the relevant services
 
 	connectionSvc := newConnectionSvc(cfg, myID, m, tlsCfg)
-	relaySvc := newRelaySvc(cfg, tlsCfg, connectionSvc.conns)
-	connectionSvc.Add(relaySvc)
+	relayer = newRelaySvc(cfg, tlsCfg, connectionSvc.conns)
+	connectionSvc.Add(relayer)
 	mainSvc.Add(connectionSvc)
 
 	// Start discovery

@@ -215,6 +215,7 @@ type ConnectionInfo struct {
 	protocol.Statistics
 	Address       string
 	ClientVersion string
+	Type          ConnectionType
 }
 
 func (info ConnectionInfo) MarshalJSON() ([]byte, error) {
@@ -223,6 +224,7 @@ func (info ConnectionInfo) MarshalJSON() ([]byte, error) {
 		"inBytesTotal":  info.InBytesTotal,
 		"outBytesTotal": info.OutBytesTotal,
 		"address":       info.Address,
+		"type":          info.Type.String(),
 		"clientVersion": info.ClientVersion,
 	})
 }
@@ -245,6 +247,7 @@ func (m *Model) ConnectionStats() map[string]interface{} {
 		}
 		if addr := m.conn[device].RemoteAddr(); addr != nil {
 			ci.Address = addr.String()
+			ci.Type = conn.Type
 		}
 
 		conns[device.String()] = ci
@@ -581,6 +584,7 @@ func (m *Model) ClusterConfig(deviceID protocol.DeviceID, cm protocol.ClusterCon
 	}
 
 	if conn, ok := m.conn[deviceID]; ok {
+		event["type"] = conn.Type.String()
 		addr := conn.RemoteAddr()
 		if addr != nil {
 			event["addr"] = addr.String()

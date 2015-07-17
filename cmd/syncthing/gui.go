@@ -627,6 +627,9 @@ func (s *apiSvc) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 	if cfg.Options().GlobalAnnEnabled && discoverer != nil {
 		res["extAnnounceOK"] = discoverer.ExtAnnounceOK()
 	}
+	if relayer != nil {
+		res["relayClientStatus"] = relayer.ClientStatus()
+	}
 	cpuUsageLock.RLock()
 	var cpusum float64
 	for _, p := range cpuUsagePercent {
