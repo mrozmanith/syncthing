@@ -1,6 +1,6 @@
 {
 	"ImportPath": "github.com/syncthing/syncthing",
-	"GoVersion": "devel",
+	"GoVersion": "go1.4",
 	"Packages": [
 		"./cmd/..."
 	],
@@ -36,6 +36,14 @@
 		{
 			"ImportPath": "github.com/syncthing/protocol",
 			"Rev": "22e24fc3879b1665077389f96862e222b2cdd8d3"
+		},
+		{
+			"ImportPath": "github.com/syncthing/relaysrv/client",
+			"Rev": "eb29989dff2810d7317229f7742e8e58d116dc73"
+		},
+		{
+			"ImportPath": "github.com/syncthing/relaysrv/protocol",
+			"Rev": "eb29989dff2810d7317229f7742e8e58d116dc73"
 		},
 		{
 			"ImportPath": "github.com/syndtr/goleveldb/leveldb",
