@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/syncthing/syncthing/internal/sync"
 )
@@ -209,4 +211,22 @@ func init() {
 // in the list of executable extensions.
 func IsWindowsExecutable(path string) bool {
 	return execExts[strings.ToLower(filepath.Ext(path))]
+}
+
+// SetTCPOptions sets syncthings default TCP options on a TCP connection
+func SetTCPOptions(conn *net.TCPConn) error {
+	var err error
+	if err = conn.SetLinger(0); err != nil {
+		return err
+	}
+	if err = conn.SetNoDelay(false); err != nil {
+		return err
+	}
+	if err = conn.SetKeepAlivePeriod(60 * time.Second); err != nil {
+		return err
+	}
+	if err = conn.SetKeepAlive(true); err != nil {
+		return err
+	}
+	return nil
 }
