@@ -137,16 +137,18 @@ func (l *Logger) Log(t EventType, data interface{}) {
 	l.nextID++
 	for _, s := range l.subs {
 		if s.mask&t != 0 {
-			select {
-			case s.events <- e:
-			default:
-				// if s.events is not ready, drop the event
-			}
+			s.events <- e
 		}
 	}
 	l.mutex.Unlock()
 }
 
+// Subscribe returns a new event subscription for the given event mask. Once
+// created it must be regularly Poll()ed (or wrapped in a
+// BufferedSubscription) until Unsubscribed. Not polling events will block the
+// event system, in effect blocking the event producers. The Subscription has
+// an internal buffer of BufferSize events to provide som elasticity before
+// blocking occurs.
 func (l *Logger) Subscribe(mask EventType) *Subscription {
 	l.mutex.Lock()
 	if debug {
@@ -219,18 +221,7 @@ func NewBufferedSubscription(s *Subscription, size int) *BufferedSubscription {
 }
 
 func (s *BufferedSubscription) pollingLoop() {
-	for {
-		ev, err := s.sub.Poll(60 * time.Second)
-		if err == ErrTimeout {
-			continue
-		}
-		if err == ErrClosed {
-			return
-		}
-		if err != nil {
-			panic("unexpected error: " + err.Error())
-		}
-
+	for ev := range s.sub.events {
 		s.mut.Lock()
 		s.buf[s.next] = ev
 		s.next = (s.next + 1) % len(s.buf)

@@ -88,20 +88,6 @@ func TestEventAfterSubscribeIgnoreMask(t *testing.T) {
 	}
 }
 
-func TestBufferOverflow(t *testing.T) {
-	l := events.NewLogger()
-
-	_ = l.Subscribe(events.AllEvents)
-
-	t0 := time.Now()
-	for i := 0; i < events.BufferSize*2; i++ {
-		l.Log(events.DeviceConnected, "foo")
-	}
-	if time.Since(t0) > timeout {
-		t.Fatalf("Logging took too long")
-	}
-}
-
 func TestUnsubscribe(t *testing.T) {
 	l := events.NewLogger()
 
