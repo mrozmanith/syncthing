@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/syncthing/protocol"
+	"github.com/syncthing/syncthing/internal/clock"
 	"github.com/syncthing/syncthing/internal/config"
 	"github.com/syncthing/syncthing/internal/db"
 	"github.com/syncthing/syncthing/internal/events"
@@ -1083,6 +1084,10 @@ func sendIndexTo(initial bool, minLocalVer int64, conn protocol.Connection, fold
 }
 
 func (m *Model) updateLocals(folder string, fs []protocol.FileInfo) {
+	for i := range fs {
+		fs[i].LocalVersion = clock.Tick()
+	}
+
 	m.fmut.RLock()
 	files := m.folderFiles[folder]
 	m.fmut.RUnlock()

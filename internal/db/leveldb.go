@@ -16,28 +16,12 @@ import (
 	"sort"
 
 	"github.com/syncthing/protocol"
-	"github.com/syncthing/syncthing/internal/sync"
+	"github.com/syncthing/syncthing/internal/clock"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
-
-var (
-	clockTick int64
-	clockMut  = sync.NewMutex()
-)
-
-func clock(v int64) int64 {
-	clockMut.Lock()
-	defer clockMut.Unlock()
-	if v > clockTick {
-		clockTick = v + 1
-	} else {
-		clockTick++
-	}
-	return clockTick
-}
 
 const (
 	KeyTypeDevice = iota
@@ -414,7 +398,7 @@ func ldbInsert(batch dbWriter, folder, device []byte, file protocol.FileInfo) in
 	}
 
 	if file.LocalVersion == 0 {
-		file.LocalVersion = clock(0)
+		file.LocalVersion = clock.Tick()
 	}
 
 	name := []byte(file.Name)

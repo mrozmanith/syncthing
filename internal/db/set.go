@@ -65,7 +65,6 @@ func NewFileSet(folder string, db *leveldb.DB) *FileSet {
 	if debug {
 		l.Debugf("loaded localVersion for %q: %#v", folder, s.localVersion)
 	}
-	clock(s.localVersion[protocol.LocalDeviceID])
 
 	return &s
 }
