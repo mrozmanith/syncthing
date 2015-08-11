@@ -1033,7 +1033,9 @@ func (p *rwFolder) handleFile(file protocol.FileInfo, copyChan chan<- copyBlocks
 
 // shortcutFile sets file mode and modification time, when that's the only
 // thing that has changed.
-func (p *rwFolder) shortcutFile(file protocol.FileInfo) error {
+func (p *rwFolder) shortcutFile(file protocol.FileInfo) (wrappedError error) {
+	defer wrapErrorPointer(&wrappedError, "shortcutFile")
+
 	realName := filepath.Join(p.dir, file.Name)
 	if !p.ignorePermissions(file) {
 		if err := os.Chmod(realName, os.FileMode(file.Flags&0777)); err != nil {
@@ -1066,13 +1068,14 @@ func (p *rwFolder) shortcutFile(file protocol.FileInfo) error {
 }
 
 // shortcutSymlink changes the symlinks type if necessary.
-func (p *rwFolder) shortcutSymlink(file protocol.FileInfo) (err error) {
-	err = symlinks.ChangeType(filepath.Join(p.dir, file.Name), file.Flags)
+func (p *rwFolder) shortcutSymlink(file protocol.FileInfo) error {
+	err := symlinks.ChangeType(filepath.Join(p.dir, file.Name), file.Flags)
 	if err != nil {
 		l.Infof("Puller (folder %q, file %q): symlink shortcut: %v", p.folder, file.Name, err)
 		p.newError(file.Name, err)
+		return wrapError(err, "shortcutSymlink")
 	}
-	return
+	return nil
 }
 
 // copierRoutine reads copierStates until the in channel closes and performs
@@ -1460,7 +1463,7 @@ func moveForConflict(name string) error {
 		// matter, go ahead as if the move succeeded.
 		return nil
 	}
-	return err
+	return wrapError(err, "moveForConflict")
 }
 
 func (p *rwFolder) newError(path string, err error) {

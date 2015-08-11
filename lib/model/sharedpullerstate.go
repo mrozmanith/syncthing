@@ -67,7 +67,9 @@ func (w lockedWriterAt) WriteAt(p []byte, off int64) (n int, err error) {
 
 // tempFile returns the fd for the temporary file, reusing an open fd
 // or creating the file as necessary.
-func (s *sharedPullerState) tempFile() (io.WriterAt, error) {
+func (s *sharedPullerState) tempFile() (w io.WriterAt, wrappedError error) {
+	defer wrapErrorPointer(&wrappedError, "tempFile")
+
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -129,7 +131,9 @@ func (s *sharedPullerState) tempFile() (io.WriterAt, error) {
 }
 
 // sourceFile opens the existing source file for reading
-func (s *sharedPullerState) sourceFile() (*os.File, error) {
+func (s *sharedPullerState) sourceFile() (f *os.File, wrappedError error) {
+	defer wrapErrorPointer(&wrappedError, "sourceFile")
+
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -215,7 +219,9 @@ func (s *sharedPullerState) pullDone() {
 // the error indicating the success or failure of the close. A false first
 // return value indicates the file is not ready to be closed, or is already
 // closed and should in either case not be finished off now.
-func (s *sharedPullerState) finalClose() (bool, error) {
+func (s *sharedPullerState) finalClose() (closed bool, wrappedError error) {
+	defer wrapErrorPointer(&wrappedError, "tempFile")
+
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
