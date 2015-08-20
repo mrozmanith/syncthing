@@ -10,7 +10,7 @@ bin
 perfstats*.csv
 coverage.xml
 !gui/scripts/syncthing
-syncthing.md5
-syncthing.exe.md5
+syncthing.sha256
+syncthing.exe.sha256
 RELEASE
 deb

@@ -13,7 +13,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
-	"crypto/md5"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io"
@@ -215,7 +215,7 @@ func build(pkg string, tags []string) {
 		binary += ".exe"
 	}
 
-	rmr(binary, binary+".md5")
+	rmr(binary, binary+".sha256")
 	args := []string{"build", "-ldflags", ldflags()}
 	if len(tags) > 0 {
 		args = append(args, "-tags", strings.Join(tags, ","))
@@ -227,9 +227,9 @@ func build(pkg string, tags []string) {
 	setBuildEnv()
 	runPrint("go", args...)
 
-	// Create an md5 checksum of the binary, to be included in the archive for
+	// Create a hash of the binary, to be included in the archive for
 	// automatic upgrades.
-	err := md5File(binary)
+	err := sha256File(binary)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func buildTar() {
 		{src: "LICENSE", dst: name + "/LICENSE.txt"},
 		{src: "AUTHORS", dst: name + "/AUTHORS.txt"},
 		{src: "syncthing", dst: name + "/syncthing"},
-		{src: "syncthing.md5", dst: name + "/syncthing.md5"},
+		{src: "syncthing.sha256", dst: name + "/syncthing.sha256"},
 	}
 
 	for _, file := range listFiles("etc") {
@@ -277,7 +277,7 @@ func buildZip() {
 		{src: "LICENSE", dst: name + "/LICENSE.txt"},
 		{src: "AUTHORS", dst: name + "/AUTHORS.txt"},
 		{src: "syncthing.exe", dst: name + "/syncthing.exe"},
-		{src: "syncthing.exe.md5", dst: name + "/syncthing.exe.md5"},
+		{src: "syncthing.exe.sha256", dst: name + "/syncthing.exe.sha256"},
 	}
 
 	for _, file := range listFiles("extra") {
@@ -712,20 +712,20 @@ func zipFile(out string, files []archiveFile) {
 	}
 }
 
-func md5File(file string) error {
+func sha256File(file string) error {
 	fd, err := os.Open(file)
 	if err != nil {
 		return err
 	}
 	defer fd.Close()
 
-	h := md5.New()
+	h := sha256.New()
 	_, err = io.Copy(h, fd)
 	if err != nil {
 		return err
 	}
 
-	out, err := os.Create(file + ".md5")
+	out, err := os.Create(file + ".sha256")
 	if err != nil {
 		return err
 	}

@@ -13,7 +13,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -166,7 +166,7 @@ func readTarGz(dir string, r io.Reader) (string, error) {
 
 	tr := tar.NewReader(gr)
 
-	var tempName, actualMD5, expectedMD5 string
+	var tempName, actualHash, expectedHash string
 
 	// Iterate through the files in the archive.
 fileLoop:
@@ -191,28 +191,28 @@ fileLoop:
 			if debug {
 				l.Debugln("writing and hashing binary")
 			}
-			tempName, actualMD5, err = writeBinary(dir, tr)
+			tempName, actualHash, err = writeBinary(dir, tr)
 			if err != nil {
 				return "", err
 			}
 
-			if expectedMD5 != "" {
+			if expectedHash != "" {
 				// We're done
 				break fileLoop
 			}
 
-		case "syncthing.md5":
+		case "syncthing.sha256":
 			bs, err := ioutil.ReadAll(tr)
 			if err != nil {
 				return "", err
 			}
 
-			expectedMD5 = strings.TrimSpace(string(bs))
+			expectedHash = strings.TrimSpace(string(bs))
 			if debug {
-				l.Debugln("expected md5 is", actualMD5)
+				l.Debugln("expected hash is", actualHash)
 			}
 
-			if actualMD5 != "" {
+			if actualHash != "" {
 				// We're done
 				break fileLoop
 			}
@@ -221,13 +221,13 @@ fileLoop:
 
 	if tempName != "" {
 		// We found and saved something to disk.
-		if expectedMD5 == "" || actualMD5 == expectedMD5 {
+		if expectedHash == "" || actualHash == expectedHash {
 			return tempName, nil
 		}
 		os.Remove(tempName)
-		// There was an md5 file included in the archive, and it doesn't
+		// There was a hash file included in the archive, and it doesn't
 		// match what we just wrote to disk.
-		return "", fmt.Errorf("incorrect MD5 checksum")
+		return "", fmt.Errorf("incorrect hash")
 	}
 	return "", fmt.Errorf("no upgrade found")
 }
@@ -243,7 +243,7 @@ func readZip(dir string, r io.Reader) (string, error) {
 		return "", err
 	}
 
-	var tempName, actualMD5, expectedMD5 string
+	var tempName, actualHash, expectedHash string
 
 	// Iterate through the files in the archive.
 fileLoop:
@@ -264,17 +264,17 @@ fileLoop:
 			if err != nil {
 				return "", err
 			}
-			tempName, actualMD5, err = writeBinary(dir, inFile)
+			tempName, actualHash, err = writeBinary(dir, inFile)
 			if err != nil {
 				return "", err
 			}
 
-			if expectedMD5 != "" {
+			if expectedHash != "" {
 				// We're done
 				break fileLoop
 			}
 
-		case "syncthing.exe.md5":
+		case "syncthing.exe.sha256":
 			inFile, err := file.Open()
 			if err != nil {
 				return "", err
@@ -284,12 +284,12 @@ fileLoop:
 				return "", err
 			}
 
-			expectedMD5 = strings.TrimSpace(string(bs))
+			expectedHash = strings.TrimSpace(string(bs))
 			if debug {
-				l.Debugln("expected md5 is", actualMD5)
+				l.Debugln("expected hash is", actualHash)
 			}
 
-			if actualMD5 != "" {
+			if actualHash != "" {
 				// We're done
 				break fileLoop
 			}
@@ -298,26 +298,26 @@ fileLoop:
 
 	if tempName != "" {
 		// We found and saved something to disk.
-		if expectedMD5 == "" || actualMD5 == expectedMD5 {
+		if expectedHash == "" || actualHash == expectedHash {
 			return tempName, nil
 		}
 		os.Remove(tempName)
-		// There was an md5 file included in the archive, and it doesn't
+		// There was a hash file included in the archive, and it doesn't
 		// match what we just wrote to disk.
-		return "", fmt.Errorf("incorrect MD5 checksum")
+		return "", fmt.Errorf("incorrect hash")
 	}
 	return "", fmt.Errorf("No upgrade found")
 }
 
-func writeBinary(dir string, inFile io.Reader) (filename, md5sum string, err error) {
+func writeBinary(dir string, inFile io.Reader) (filename, hash string, err error) {
 	outFile, err := ioutil.TempFile(dir, "syncthing")
 	if err != nil {
 		return "", "", err
 	}
 
-	// Write the binary both a temporary file and to the MD5 hasher.
+	// Write the binary both a temporary file and to the SHA256 hasher.
 
-	h := md5.New()
+	h := sha256.New()
 	mw := io.MultiWriter(h, outFile)
 
 	_, err = io.Copy(mw, inFile)
@@ -338,10 +338,10 @@ func writeBinary(dir string, inFile io.Reader) (filename, md5sum string, err err
 		return "", "", err
 	}
 
-	actualMD5 := fmt.Sprintf("%x", h.Sum(nil))
+	actualHash := fmt.Sprintf("%x", h.Sum(nil))
 	if debug {
-		l.Debugln("actual md5 is", actualMD5)
+		l.Debugln("actual hash is", actualHash)
 	}
 
-	return outFile.Name(), actualMD5, nil
+	return outFile.Name(), actualHash, nil
 }
