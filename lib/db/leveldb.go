@@ -12,6 +12,7 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"sort"
 
@@ -1055,4 +1056,37 @@ func ldbCheckGlobals(db *leveldb.DB, folder []byte) {
 		l.Infoln("db check completed for %q", folder)
 	}
 	db.Write(batch, nil)
+}
+
+func ldbCheckStructure(db *leveldb.DB, folder []byte) {
+	defer runtime.GC()
+
+	deletes := make(map[string]bool)
+	var updates []protocol.FileInfo
+
+	ldbWithHave(db, folder, protocol.LocalDeviceID[:], false, func(fi FileIntf) bool {
+		f := fi.(protocol.FileInfo)
+		if f.IsDeleted() {
+			if f.IsDirectory() {
+				deletes[f.Name] = true
+			}
+			return true
+		}
+
+		for parent := filepath.Dir(f.Name); parent != "" && parent != "."; parent = filepath.Dir(parent) {
+			if deletes[parent] {
+				f.Flags |= protocol.FlagDeleted
+				f.Blocks = nil
+				f.Version.Update(protocol.LocalDeviceID.Short()) // UGLY!!!
+				f.LocalVersion = clock(f.LocalVersion)
+				updates = append(updates, f)
+			}
+		}
+		return true
+	})
+
+	if len(updates) > 0 {
+		l.Infoln("db repair: correcting", len(updates), "items with deleted parent")
+		ldbUpdate(db, folder, protocol.LocalDeviceID[:], updates)
+	}
 }

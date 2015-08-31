@@ -53,6 +53,7 @@ func NewFileSet(folder string, db *leveldb.DB) *FileSet {
 	}
 
 	ldbCheckGlobals(db, []byte(folder))
+	ldbCheckStructure(db, []byte(folder))
 
 	var deviceID protocol.DeviceID
 	ldbWithAllFolderTruncated(db, []byte(folder), func(device []byte, f FileInfoTruncated) bool {
