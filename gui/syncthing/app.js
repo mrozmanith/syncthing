@@ -13,6 +13,7 @@ var syncthing = angular.module('syncthing', [
     'pascalprecht.translate',
 
     'syncthing.core',
+    'syncthing.debug',
     'syncthing.device',
     'syncthing.folder',
     'syncthing.settings',
