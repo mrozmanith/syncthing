@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/calmh/xdr"
 	"github.com/syncthing/syncthing/lib/osutil"
 	"github.com/syncthing/syncthing/lib/protocol"
 
@@ -22,22 +23,23 @@ var blockFinder *BlockFinder
 const maxBatchSize = 256 << 10
 
 type BlockMap struct {
-	db     *Instance
-	folder uint32
+	db       *Instance
+	folderID uint32
 }
 
-func NewBlockMap(db *Instance, folder uint32) *BlockMap {
+func NewBlockMap(db *Instance, folderID uint32) *BlockMap {
 	return &BlockMap{
-		db:     db,
-		folder: folder,
+		db:       db,
+		folderID: folderID,
 	}
 }
 
 // Add files to the block map, ignoring any deleted or invalid files.
 func (m *BlockMap) Add(files []protocol.FileInfo) error {
 	batch := new(leveldb.Batch)
-	buf := make([]byte, 4)
-	var key []byte
+	key := make([]byte, 33)
+	key[0] = KeyTypeBlock
+	var buf []byte
 	for _, file := range files {
 		if batch.Len() > maxBatchSize {
 			if err := m.db.Write(batch, nil); err != nil {
@@ -50,10 +52,25 @@ func (m *BlockMap) Add(files []protocol.FileInfo) error {
 			continue
 		}
 
+		nameID := m.db.nameIdx.ID([]byte(file.Name))
 		for i, block := range file.Blocks {
-			binary.BigEndian.PutUint32(buf, uint32(i))
-			key = m.blockKeyInto(key, block.Hash, file.Name)
-			batch.Put(key, buf)
+			copy(key[1:], block.Hash)
+			var bl blockmapList
+			bs, err := m.db.Get(key, nil)
+			if err == nil {
+				bl.UnmarshalXDR(bs)
+			}
+			bl.locations = append(bl.locations, blockmapLocation{
+				folderID: m.folderID,
+				nameID:   nameID,
+				blockIdx: uint32(i),
+			})
+			reqLen := bl.XDRSize()
+			if len(buf) < reqLen {
+				buf = make([]byte, reqLen)
+			}
+			bl.MarshalXDRInto(&xdr.Marshaller{Data: buf})
+			batch.Put(key, buf[:reqLen])
 		}
 	}
 	return m.db.Write(batch, nil)
@@ -62,8 +79,9 @@ func (m *BlockMap) Add(files []protocol.FileInfo) error {
 // Update block map state, removing any deleted or invalid files.
 func (m *BlockMap) Update(files []protocol.FileInfo) error {
 	batch := new(leveldb.Batch)
-	buf := make([]byte, 4)
-	var key []byte
+	key := make([]byte, 33)
+	key[0] = KeyTypeBlock
+	var buf []byte
 	for _, file := range files {
 		if batch.Len() > maxBatchSize {
 			if err := m.db.Write(batch, nil); err != nil {
@@ -84,10 +102,29 @@ func (m *BlockMap) Update(files []protocol.FileInfo) error {
 			continue
 		}
 
+		nameID := m.db.nameIdx.ID([]byte(file.Name))
 		for i, block := range file.Blocks {
-			binary.BigEndian.PutUint32(buf, uint32(i))
-			key = m.blockKeyInto(key, block.Hash, file.Name)
-			batch.Put(key, buf)
+			copy(key[1:], block.Hash)
+			var bl blockmapList
+			bs, err := m.db.Get(key, nil)
+			if err == nil {
+				bl.UnmarshalXDR(bs)
+			}
+
+			for i := range bl.locations {
+				if bl.locations[i].nameID == nameID && bl.locations[i].folderID == m.folderID {
+					copy(bl.locations[i:], bl.locations[i+1:])
+					bl.locations = bl.locations[:len(bl.locations)-1]
+					break
+				}
+			}
+
+			reqLen := bl.XDRSize()
+			if len(buf) < reqLen {
+				buf = make([]byte, reqLen)
+			}
+			bl.MarshalXDRInto(&xdr.Marshaller{Data: buf})
+			batch.Put(key, buf[:reqLen])
 		}
 	}
 	return m.db.Write(batch, nil)
@@ -132,10 +169,6 @@ func (m *BlockMap) Drop() error {
 		return iter.Error()
 	}
 	return m.db.Write(batch, nil)
-}
-
-func (m *BlockMap) blockKeyInto(o, hash []byte, file string) []byte {
-	return blockKeyInto(o, hash, m.folder, file)
 }
 
 type BlockFinder struct {

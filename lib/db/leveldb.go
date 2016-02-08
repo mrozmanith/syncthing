@@ -93,6 +93,16 @@ func (l fileList) Less(a, b int) bool {
 	return l[a].Name < l[b].Name
 }
 
+type blockmapList struct {
+	locations []blockmapLocation
+}
+
+type blockmapLocation struct {
+	folderID uint32
+	nameID   uint64
+	blockIdx uint32
+}
+
 type dbReader interface {
 	Get([]byte, *opt.ReadOptions) ([]byte, error)
 }

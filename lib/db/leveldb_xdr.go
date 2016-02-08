@@ -270,3 +270,136 @@ func (o *oldVersionList) UnmarshalXDRFrom(u *xdr.Unmarshaller) error {
 	}
 	return u.Error
 }
+
+/*
+
+blockmapList Structure:
+
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Number of locations                      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/                                                               /
+\           Zero or more blockmapLocation Structures            \
+/                                                               /
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+struct blockmapList {
+	blockmapLocation locations<>;
+}
+
+*/
+
+func (o blockmapList) XDRSize() int {
+	return 4 + xdr.SizeOfSlice(o.locations)
+}
+
+func (o blockmapList) MarshalXDR() ([]byte, error) {
+	buf := make([]byte, o.XDRSize())
+	m := &xdr.Marshaller{Data: buf}
+	return buf, o.MarshalXDRInto(m)
+}
+
+func (o blockmapList) MustMarshalXDR() []byte {
+	bs, err := o.MarshalXDR()
+	if err != nil {
+		panic(err)
+	}
+	return bs
+}
+
+func (o blockmapList) MarshalXDRInto(m *xdr.Marshaller) error {
+	m.MarshalUint32(uint32(len(o.locations)))
+	for i := range o.locations {
+		if err := o.locations[i].MarshalXDRInto(m); err != nil {
+			return err
+		}
+	}
+	return m.Error
+}
+
+func (o *blockmapList) UnmarshalXDR(bs []byte) error {
+	u := &xdr.Unmarshaller{Data: bs}
+	return o.UnmarshalXDRFrom(u)
+}
+func (o *blockmapList) UnmarshalXDRFrom(u *xdr.Unmarshaller) error {
+	_locationsSize := int(u.UnmarshalUint32())
+	if _locationsSize < 0 {
+		return xdr.ElementSizeExceeded("locations", _locationsSize, 0)
+	} else if _locationsSize == 0 {
+		o.locations = nil
+	} else {
+		if _locationsSize <= len(o.locations) {
+			o.locations = o.locations[:_locationsSize]
+		} else {
+			o.locations = make([]blockmapLocation, _locationsSize)
+		}
+		for i := range o.locations {
+			(&o.locations[i]).UnmarshalXDRFrom(u)
+		}
+	}
+	return u.Error
+}
+
+/*
+
+blockmapLocation Structure:
+
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           folder ID                           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
++                       name ID (64 bits)                       +
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           block Idx                           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+struct blockmapLocation {
+	unsigned int folderID;
+	unsigned hyper nameID;
+	unsigned int blockIdx;
+}
+
+*/
+
+func (o blockmapLocation) XDRSize() int {
+	return 4 + 8 + 4
+}
+
+func (o blockmapLocation) MarshalXDR() ([]byte, error) {
+	buf := make([]byte, o.XDRSize())
+	m := &xdr.Marshaller{Data: buf}
+	return buf, o.MarshalXDRInto(m)
+}
+
+func (o blockmapLocation) MustMarshalXDR() []byte {
+	bs, err := o.MarshalXDR()
+	if err != nil {
+		panic(err)
+	}
+	return bs
+}
+
+func (o blockmapLocation) MarshalXDRInto(m *xdr.Marshaller) error {
+	m.MarshalUint32(o.folderID)
+	m.MarshalUint64(o.nameID)
+	m.MarshalUint32(o.blockIdx)
+	return m.Error
+}
+
+func (o *blockmapLocation) UnmarshalXDR(bs []byte) error {
+	u := &xdr.Unmarshaller{Data: bs}
+	return o.UnmarshalXDRFrom(u)
+}
+func (o *blockmapLocation) UnmarshalXDRFrom(u *xdr.Unmarshaller) error {
+	o.folderID = u.UnmarshalUint32()
+	o.nameID = u.UnmarshalUint64()
+	o.blockIdx = u.UnmarshalUint32()
+	return u.Error
+}
