@@ -36,5 +36,6 @@
         <releasesURL>https://localhost/releases</releasesURL>
         <overwriteNames>true</overwriteNames>
         <tempIndexMinBlocks>100</tempIndexMinBlocks>
+        <dbCompressionDisableThreshold>16</dbCompressionDisableThreshold>
     </options>
 </configuration>

@@ -47,7 +47,7 @@ func tempDB() (*db.Instance, string) {
 	if err != nil {
 		panic(err)
 	}
-	dbi, err := db.Open(filepath.Join(dir, "db"))
+	dbi, err := db.Open(filepath.Join(dir, "db"), os.Getenv("NOCOMP") == "")
 	if err != nil {
 		panic(err)
 	}

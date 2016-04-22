@@ -42,6 +42,11 @@ type OptionsConfiguration struct {
 	OverwriteNames          bool     `xml:"overwriteNames" json:"overwriteNames" default:"false"`
 	TempIndexMinBlocks      int      `xml:"tempIndexMinBlocks" json:"tempIndexMinBlocks" default:"10"`
 
+	// Disable DB compression when hashing performance < this many MB/s.
+	// Database compression doesn't depend on hashing, but we use hashing
+	// rate as a CPU benchmark when starting up.
+	DBCompDisableThres float64 `xml:"dbCompressionDisableThreshold" json:"dbCompressionDisableThreshold" default:"25"`
+
 	DeprecatedUPnPEnabled  bool `xml:"upnpEnabled"`
 	DeprecatedUPnPLeaseM   int  `xml:"upnpLeaseMinutes"`
 	DeprecatedUPnPRenewalM int  `xml:"upnpRenewalMinutes"`

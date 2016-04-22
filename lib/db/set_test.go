@@ -634,7 +634,7 @@ func BenchmarkUpdateOneFile(b *testing.B) {
 		protocol.FileInfo{Name: "zajksdhaskjdh/askjdhaskjdashkajshd/kasjdhaskjdhaskdjhaskdjash/dkjashdaksjdhaskdjahskdjh", Version: protocol.Vector{{ID: myID, Value: 1000}}, Blocks: genBlocks(8)},
 	}
 
-	ldb, err := db.Open("testdata/benchmarkupdate.db")
+	ldb, err := db.Open("testdata/benchmarkupdate.db", true)
 	if err != nil {
 		b.Fatal(err)
 	}

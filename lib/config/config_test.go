@@ -63,6 +63,7 @@ func TestDefaultValues(t *testing.T) {
 		AlwaysLocalNets:         []string{},
 		OverwriteNames:          false,
 		TempIndexMinBlocks:      10,
+		DBCompDisableThres:      25,
 	}
 
 	cfg := New(device1)
@@ -194,6 +195,7 @@ func TestOverriddenValues(t *testing.T) {
 		AlwaysLocalNets:         []string{},
 		OverwriteNames:          true,
 		TempIndexMinBlocks:      100,
+		DBCompDisableThres:      16,
 	}
 
 	cfg, err := Load("testdata/overridenvalues.xml", device1)

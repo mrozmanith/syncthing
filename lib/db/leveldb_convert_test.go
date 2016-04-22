@@ -42,7 +42,7 @@ func TestLabelConversion(t *testing.T) {
 	ldb.Close()
 	odb.Close()
 
-	inst, err := Open("testdata/newformat.db")
+	inst, err := Open("testdata/newformat.db", true)
 	if err != nil {
 		t.Fatal(err)
 	}

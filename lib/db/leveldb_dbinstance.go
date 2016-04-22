@@ -40,10 +40,14 @@ const (
 	keyHashLen   = 32
 )
 
-func Open(file string) (*Instance, error) {
+func Open(file string, useCompression bool) (*Instance, error) {
 	opts := &opt.Options{
 		OpenFilesCacheCapacity: 100,
 		WriteBuffer:            4 << 20,
+	}
+
+	if !useCompression {
+		opts.Compression = opt.NoCompression
 	}
 
 	if _, err := os.Stat(file); os.IsNotExist(err) {

@@ -463,7 +463,7 @@ func checkUpgrade() upgrade.Release {
 
 func performUpgrade(release upgrade.Release) {
 	// Use leveldb database locks to protect against concurrent upgrades
-	_, err := db.Open(locations[locDatabase])
+	_, err := db.Open(locations[locDatabase], true)
 	if err == nil {
 		err = upgrade.To(release)
 		if err != nil {
@@ -566,7 +566,9 @@ func syncthingMain(runtimeOptions RuntimeOptions) {
 
 	l.Infoln(LongVersion)
 	l.Infoln("My ID:", myID)
-	printHashRate()
+
+	hashRate := cpuBench(3, 100*time.Millisecond)
+	printHashRate(hashRate)
 
 	// Emit the Starting event, now that we know who we are.
 
@@ -640,7 +642,8 @@ func syncthingMain(runtimeOptions RuntimeOptions) {
 	}
 
 	dbFile := locations[locDatabase]
-	ldb, err := db.Open(dbFile)
+	useCompression := hashRate > opts.DBCompDisableThres
+	ldb, err := db.Open(dbFile, useCompression)
 
 	if err != nil {
 		l.Fatalln("Cannot open database:", err, "- Is another copy of Syncthing already running?")
@@ -893,9 +896,7 @@ func setupSignalHandling() {
 // printHashRate prints the hashing performance in MB/s, formatting it with
 // appropriate precision for the value, i.e. 182 MB/s, 18 MB/s, 1.8 MB/s, 0.18
 // MB/s.
-func printHashRate() {
-	hashRate := cpuBench(3, 100*time.Millisecond)
-
+func printHashRate(hashRate float64) {
 	decimals := 0
 	if hashRate < 1 {
 		decimals = 2
