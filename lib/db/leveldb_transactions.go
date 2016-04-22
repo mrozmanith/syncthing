@@ -99,6 +99,7 @@ func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.
 	var fl versionList
 	var oldFile protocol.FileInfo
 	var hasOldFile bool
+	var currentVersion protocol.Vector
 	// Remove the device from the current version list
 	if len(svl) != 0 {
 		err = fl.UnmarshalXDR(svl)
@@ -106,9 +107,11 @@ func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.
 			panic(err)
 		}
 
-		for i := range fl.versions {
-			if bytes.Equal(fl.versions[i].device, device) {
-				if fl.versions[i].version.Equal(file.Version) {
+		currentVersion = fl.versions[0].version
+
+		for i, f := range fl.versions {
+			if bytes.Equal(f.device, device) {
+				if f.version.Equal(file.Version) {
 					// No need to do anything
 					return false
 				}
@@ -117,6 +120,14 @@ func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.
 					// Keep the current newest file around so we can subtract it from
 					// the globalSize if we replace it.
 					oldFile, hasOldFile = t.getFile(folder, fl.versions[0].device, name)
+				}
+
+				if i > 0 && !f.version.Equal(currentVersion) {
+					// This device already has an entry in the list which is
+					// not the newest, so it is on their need size. Remove
+					// it from their need size.
+					of, _ := t.getFile(folder, device, name)
+					size.need(device).removeFile(of)
 				}
 
 				fl.versions = append(fl.versions[:i], fl.versions[i+1:]...)
@@ -185,6 +196,23 @@ done:
 		}
 	}
 
+	if !file.Version.LesserEqual(currentVersion) { // file.Version > currentVersion
+		l.Debugln("checking", file)
+		for _, f := range fl.versions {
+			if f.version.Equal(currentVersion) {
+				// The files that were at the previous global version should
+				// now be on the need list instead.
+				of, _ := t.getFile(folder, f.device, name)
+				size.need(device).addFile(of)
+				l.Debugln("need add", of)
+			} else if f.version.LesserEqual(currentVersion) {
+				// The files which have lesser versions than the old global
+				// are already on the need list. We can stop here.
+				break
+			}
+		}
+	}
+
 	l.Debugf("new global after update: %v", fl)
 	t.Put(gk, fl.MustMarshalXDR())
 
@@ -211,9 +239,16 @@ func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, size
 		panic(err)
 	}
 
+	if len(fl.versions) == 0 {
+		// Early return if we have an empty list (nothing to remove).
+		t.Delete(gk)
+		return
+	}
+
+	currentHeadVersion := fl.versions[0].version
 	removed := false
-	for i := range fl.versions {
-		if bytes.Equal(fl.versions[i].device, device) {
+	for i, f := range fl.versions {
+		if bytes.Equal(f.device, device) {
 			if i == 0 && size != nil {
 				f, ok := t.getFile(folder, device, file)
 				if !ok {
@@ -222,6 +257,14 @@ func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, size
 				size.global.removeFile(f)
 				removed = true
 			}
+
+			if !f.version.GreaterEqual(currentHeadVersion) { // f.version < currentHeadVersion
+				// The file was previously on the need list, but we're
+				// removing it now.
+				f, _ := t.getFile(folder, device, file)
+				size.need(device).removeFile(f)
+			}
+
 			fl.versions = append(fl.versions[:i], fl.versions[i+1:]...)
 			break
 		}
@@ -229,15 +272,28 @@ func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, size
 
 	if len(fl.versions) == 0 {
 		t.Delete(gk)
-	} else {
-		l.Debugf("new global after remove: %v", fl)
-		t.Put(gk, fl.MustMarshalXDR())
-		if removed {
-			f, ok := t.getFile(folder, fl.versions[0].device, file)
-			if !ok {
-				panic("new global is nonexistent file")
+		return
+	}
+
+	l.Debugf("new global after remove: %v", fl)
+	t.Put(gk, fl.MustMarshalXDR())
+	if removed {
+		f, ok := t.getFile(folder, fl.versions[0].device, file)
+		if !ok {
+			panic("new global is nonexistent file")
+		}
+		size.global.addFile(f)
+	}
+
+	newHeadVersion := fl.versions[0].version
+	if !newHeadVersion.Equal(currentHeadVersion) {
+		// The head version has changed. The files with the new head version
+		// were on the need list, but should not be any more.
+		for _, f := range fl.versions {
+			if f.version.Equal(newHeadVersion) {
+				f, _ := t.getFile(folder, f.device, file)
+				size.need(device).removeFile(f)
 			}
-			size.global.addFile(f)
 		}
 	}
 }

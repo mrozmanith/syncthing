@@ -70,6 +70,18 @@ func needList(s *db.FileSet, n protocol.DeviceID) []protocol.FileInfo {
 	return fs
 }
 
+func sizeOfList(l []protocol.FileInfo) (files, deleted int, bytes int64) {
+	for _, f := range l {
+		bytes += f.Size()
+		if f.IsDeleted() {
+			deleted++
+		} else {
+			files++
+		}
+	}
+	return
+}
+
 type fileList []protocol.FileInfo
 
 func (l fileList) Len() int {
@@ -235,11 +247,23 @@ func TestGlobalSet(t *testing.T) {
 		t.Errorf("Need incorrect;\n A: %v !=\n E: %v", n, expectedLocalNeed)
 	}
 
+	nf, nd, nb := m.NeedSize(protocol.LocalDeviceID)
+	ef, ed, eb := sizeOfList(n)
+	if nf != ef || nd != ed || nb != eb {
+		t.Errorf("Need size incorrect; A: %d %d %d, E: %d %d %d", nf, nd, nb, ef, ed, eb)
+	}
+
 	n = fileList(needList(m, remoteDevice0))
 	sort.Sort(n)
 
 	if fmt.Sprint(n) != fmt.Sprint(expectedRemoteNeed) {
 		t.Errorf("Need incorrect;\n A: %v !=\n E: %v", n, expectedRemoteNeed)
+	}
+
+	nf, nd, nb = m.NeedSize(remoteDevice0)
+	ef, ed, eb = sizeOfList(n)
+	if nf != ef || nd != ed || nb != eb {
+		t.Errorf("Need size incorrect; A: %d %d %d, E: %d %d %d", nf, nd, nb, ef, ed, eb)
 	}
 
 	f, ok := m.Get(protocol.LocalDeviceID, "b")
@@ -331,6 +355,12 @@ func TestNeedWithInvalid(t *testing.T) {
 
 	if fmt.Sprint(need) != fmt.Sprint(expectedNeed) {
 		t.Errorf("Need incorrect;\n A: %v !=\n E: %v", need, expectedNeed)
+	}
+
+	nf, nd, nb := s.NeedSize(protocol.LocalDeviceID)
+	ef, ed, eb := sizeOfList(need)
+	if nf != ef || nd != ed || nb != eb {
+		t.Errorf("Need size incorrect; A: %d %d %d, E: %d %d %d", nf, nd, nb, ef, ed, eb)
 	}
 }
 
@@ -477,6 +507,12 @@ func TestNeed(t *testing.T) {
 
 	if fmt.Sprint(need) != fmt.Sprint(shouldNeed) {
 		t.Errorf("Need incorrect;\n%v !=\n%v", need, shouldNeed)
+	}
+
+	nf, nd, nb := m.NeedSize(protocol.LocalDeviceID)
+	ef, ed, eb := sizeOfList(shouldNeed)
+	if nf != ef || nd != ed || nb != eb {
+		t.Errorf("Need size incorrect; A: %d %d %d, E: %d %d %d", nf, nd, nb, ef, ed, eb)
 	}
 }
 

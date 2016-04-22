@@ -92,12 +92,27 @@ func (s *size) Size() (files, deleted int, bytes int64) {
 }
 
 type sizeTracker struct {
-	local  size
-	global size
+	local    size
+	global   size
+	needs    map[string]*size // device ID -> need size
+	needsMut stdsync.Mutex
 }
 
 func newSizeTracker() *sizeTracker {
-	return &sizeTracker{}
+	return &sizeTracker{
+		needs: make(map[string]*size),
+	}
+}
+
+func (s *sizeTracker) need(device []byte) *size {
+	s.needsMut.Lock()
+	t, ok := s.needs[string(device)]
+	if !ok {
+		t = new(size)
+		s.needs[string(device)] = t
+	}
+	s.needsMut.Unlock()
+	return t
 }
 
 func NewFileSet(folder string, db *Instance) *FileSet {
@@ -249,6 +264,10 @@ func (s *FileSet) LocalSize() (files, deleted int, bytes int64) {
 
 func (s *FileSet) GlobalSize() (files, deleted int, bytes int64) {
 	return s.size.global.Size()
+}
+
+func (s *FileSet) NeedSize(device protocol.DeviceID) (files, deleted int, bytes int64) {
+	return s.size.need(device[:]).Size()
 }
 
 // DropFolder clears out all information related to the given folder from the
