@@ -91,7 +91,7 @@ func newDBInstance(db *leveldb.DB) *Instance {
 	return i
 }
 
-func (db *Instance) genericReplace(folder, device []byte, fs []protocol.FileInfo, localSize, globalSize *sizeTracker, deleteFn deletionHandler) int64 {
+func (db *Instance) genericReplace(folder, device []byte, fs []protocol.FileInfo, size *sizeTracker, deleteFn deletionHandler) int64 {
 	sort.Sort(fileList(fs)) // sort list on name, same as in the database
 
 	t := db.newReadWriteTransaction()
@@ -133,12 +133,12 @@ func (db *Instance) genericReplace(folder, device []byte, fs []protocol.FileInfo
 				maxLocalVer = lv
 			}
 			if isLocalDevice {
-				localSize.addFile(fs[fsi])
+				size.local.addFile(fs[fsi])
 			}
 			if fs[fsi].IsInvalid() {
-				t.removeFromGlobal(folder, device, newName, globalSize)
+				t.removeFromGlobal(folder, device, newName, size)
 			} else {
-				t.updateGlobal(folder, device, fs[fsi], globalSize)
+				t.updateGlobal(folder, device, fs[fsi], size)
 			}
 			fsi++
 
@@ -155,13 +155,13 @@ func (db *Instance) genericReplace(folder, device []byte, fs []protocol.FileInfo
 					maxLocalVer = lv
 				}
 				if isLocalDevice {
-					localSize.removeFile(ef)
-					localSize.addFile(fs[fsi])
+					size.local.removeFile(ef)
+					size.local.addFile(fs[fsi])
 				}
 				if fs[fsi].IsInvalid() {
-					t.removeFromGlobal(folder, device, newName, globalSize)
+					t.removeFromGlobal(folder, device, newName, size)
 				} else {
-					t.updateGlobal(folder, device, fs[fsi], globalSize)
+					t.updateGlobal(folder, device, fs[fsi], size)
 				}
 			} else {
 				l.Debugln("generic replace; equal - ignore")
@@ -186,18 +186,18 @@ func (db *Instance) genericReplace(folder, device []byte, fs []protocol.FileInfo
 	return maxLocalVer
 }
 
-func (db *Instance) replace(folder, device []byte, fs []protocol.FileInfo, localSize, globalSize *sizeTracker) int64 {
+func (db *Instance) replace(folder, device []byte, fs []protocol.FileInfo, size *sizeTracker) int64 {
 	// TODO: Return the remaining maxLocalVer?
-	return db.genericReplace(folder, device, fs, localSize, globalSize, func(t readWriteTransaction, folder, device, name []byte, dbi iterator.Iterator) int64 {
+	return db.genericReplace(folder, device, fs, size, func(t readWriteTransaction, folder, device, name []byte, dbi iterator.Iterator) int64 {
 		// Database has a file that we are missing. Remove it.
 		l.Debugf("delete; folder=%q device=%v name=%q", folder, protocol.DeviceIDFromBytes(device), name)
-		t.removeFromGlobal(folder, device, name, globalSize)
+		t.removeFromGlobal(folder, device, name, size)
 		t.Delete(dbi.Key())
 		return 0
 	})
 }
 
-func (db *Instance) updateFiles(folder, device []byte, fs []protocol.FileInfo, localSize, globalSize *sizeTracker) int64 {
+func (db *Instance) updateFiles(folder, device []byte, fs []protocol.FileInfo, size *sizeTracker) int64 {
 	t := db.newReadWriteTransaction()
 	defer t.close()
 
@@ -210,16 +210,16 @@ func (db *Instance) updateFiles(folder, device []byte, fs []protocol.FileInfo, l
 		bs, err := t.Get(fk, nil)
 		if err == leveldb.ErrNotFound {
 			if isLocalDevice {
-				localSize.addFile(f)
+				size.local.addFile(f)
 			}
 
 			if lv := t.insertFile(folder, device, f); lv > maxLocalVer {
 				maxLocalVer = lv
 			}
 			if f.IsInvalid() {
-				t.removeFromGlobal(folder, device, name, globalSize)
+				t.removeFromGlobal(folder, device, name, size)
 			} else {
-				t.updateGlobal(folder, device, f, globalSize)
+				t.updateGlobal(folder, device, f, size)
 			}
 			continue
 		}
@@ -233,17 +233,17 @@ func (db *Instance) updateFiles(folder, device []byte, fs []protocol.FileInfo, l
 		// invalid flag on an existing file.
 		if !ef.Version.Equal(f.Version) || ef.Flags != f.Flags {
 			if isLocalDevice {
-				localSize.removeFile(ef)
-				localSize.addFile(f)
+				size.local.removeFile(ef)
+				size.local.addFile(f)
 			}
 
 			if lv := t.insertFile(folder, device, f); lv > maxLocalVer {
 				maxLocalVer = lv
 			}
 			if f.IsInvalid() {
-				t.removeFromGlobal(folder, device, name, globalSize)
+				t.removeFromGlobal(folder, device, name, size)
 			} else {
-				t.updateGlobal(folder, device, f, globalSize)
+				t.updateGlobal(folder, device, f, size)
 			}
 		}
 
@@ -563,7 +563,7 @@ func (db *Instance) dropFolder(folder []byte) {
 	dbi.Release()
 }
 
-func (db *Instance) checkGlobals(folder []byte, globalSize *sizeTracker) {
+func (db *Instance) checkGlobals(folder []byte, size *sizeTracker) {
 	t := db.newReadWriteTransaction()
 	defer t.close()
 
@@ -603,7 +603,7 @@ func (db *Instance) checkGlobals(folder []byte, globalSize *sizeTracker) {
 				if !ok {
 					panic("nonexistent global master file")
 				}
-				globalSize.addFile(fi)
+				size.global.addFile(fi)
 			}
 		}
 

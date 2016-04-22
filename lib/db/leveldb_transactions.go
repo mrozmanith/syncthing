@@ -87,7 +87,7 @@ func (t readWriteTransaction) insertFile(folder, device []byte, file protocol.Fi
 // updateGlobal adds this device+version to the version list for the given
 // file. If the device is already present in the list, the version is updated.
 // If the file does not have an entry in the global list, it is created.
-func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.FileInfo, globalSize *sizeTracker) bool {
+func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.FileInfo, size *sizeTracker) bool {
 	l.Debugf("update global; folder=%q device=%v file=%q version=%d", folder, protocol.DeviceIDFromBytes(device), file.Name, file.Version)
 	name := []byte(file.Name)
 	gk := t.db.globalKey(folder, name)
@@ -170,17 +170,17 @@ done:
 		// We just inserted a new newest version. Fixup the global size
 		// calculation.
 		if !file.Version.Equal(oldFile.Version) {
-			globalSize.addFile(file)
+			size.global.addFile(file)
 			if hasOldFile {
 				// We have the old file that was removed at the head of the list.
-				globalSize.removeFile(oldFile)
+				size.global.removeFile(oldFile)
 			} else if len(fl.versions) > 1 {
 				// The previous newest version is now at index 1, grab it from there.
 				oldFile, ok := t.getFile(folder, fl.versions[1].device, name)
 				if !ok {
 					panic("file referenced in version list does not exist")
 				}
-				globalSize.removeFile(oldFile)
+				size.global.removeFile(oldFile)
 			}
 		}
 	}
@@ -194,7 +194,7 @@ done:
 // removeFromGlobal removes the device from the global version list for the
 // given file. If the version list is empty after this, the file entry is
 // removed entirely.
-func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, globalSize *sizeTracker) {
+func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, size *sizeTracker) {
 	l.Debugf("remove from global; folder=%q device=%v file=%q", folder, protocol.DeviceIDFromBytes(device), file)
 
 	gk := t.db.globalKey(folder, file)
@@ -214,12 +214,12 @@ func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, glob
 	removed := false
 	for i := range fl.versions {
 		if bytes.Equal(fl.versions[i].device, device) {
-			if i == 0 && globalSize != nil {
+			if i == 0 && size != nil {
 				f, ok := t.getFile(folder, device, file)
 				if !ok {
 					panic("removing nonexistent file")
 				}
-				globalSize.removeFile(f)
+				size.global.removeFile(f)
 				removed = true
 			}
 			fl.versions = append(fl.versions[:i], fl.versions[i+1:]...)
@@ -237,7 +237,7 @@ func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, glob
 			if !ok {
 				panic("new global is nonexistent file")
 			}
-			globalSize.addFile(f)
+			size.global.addFile(f)
 		}
 	}
 }

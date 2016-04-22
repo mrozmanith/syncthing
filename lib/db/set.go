@@ -26,8 +26,7 @@ type FileSet struct {
 	folder       string
 	db           *Instance
 	blockmap     *BlockMap
-	localSize    sizeTracker
-	globalSize   sizeTracker
+	size         *sizeTracker
 }
 
 // FileIntf is the set of methods implemented by both protocol.FileInfo and
@@ -46,14 +45,14 @@ type FileIntf interface {
 // continue iteration, false to stop.
 type Iterator func(f FileIntf) bool
 
-type sizeTracker struct {
+type size struct {
 	files   int
 	deleted int
 	bytes   int64
 	mut     stdsync.Mutex
 }
 
-func (s *sizeTracker) addFile(f FileIntf) {
+func (s *size) addFile(f FileIntf) {
 	if f.IsInvalid() {
 		return
 	}
@@ -68,7 +67,7 @@ func (s *sizeTracker) addFile(f FileIntf) {
 	s.mut.Unlock()
 }
 
-func (s *sizeTracker) removeFile(f FileIntf) {
+func (s *size) removeFile(f FileIntf) {
 	if f.IsInvalid() {
 		return
 	}
@@ -86,10 +85,19 @@ func (s *sizeTracker) removeFile(f FileIntf) {
 	s.mut.Unlock()
 }
 
-func (s *sizeTracker) Size() (files, deleted int, bytes int64) {
+func (s *size) Size() (files, deleted int, bytes int64) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 	return s.files, s.deleted, s.bytes
+}
+
+type sizeTracker struct {
+	local  size
+	global size
+}
+
+func newSizeTracker() *sizeTracker {
+	return &sizeTracker{}
 }
 
 func NewFileSet(folder string, db *Instance) *FileSet {
@@ -98,10 +106,11 @@ func NewFileSet(folder string, db *Instance) *FileSet {
 		folder:       folder,
 		db:           db,
 		blockmap:     NewBlockMap(db, db.folderIdx.ID([]byte(folder))),
+		size:         newSizeTracker(),
 		mutex:        sync.NewMutex(),
 	}
 
-	s.db.checkGlobals([]byte(folder), &s.globalSize)
+	s.db.checkGlobals([]byte(folder), s.size)
 
 	var deviceID protocol.DeviceID
 	s.db.withAllFolderTruncated([]byte(folder), func(device []byte, f FileInfoTruncated) bool {
@@ -110,7 +119,7 @@ func NewFileSet(folder string, db *Instance) *FileSet {
 			s.localVersion[deviceID] = f.LocalVersion
 		}
 		if deviceID == protocol.LocalDeviceID {
-			s.localSize.addFile(f)
+			s.size.local.addFile(f)
 		}
 		return true
 	})
@@ -125,7 +134,7 @@ func (s *FileSet) Replace(device protocol.DeviceID, fs []protocol.FileInfo) {
 	normalizeFilenames(fs)
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.localVersion[device] = s.db.replace([]byte(s.folder), device[:], fs, &s.localSize, &s.globalSize)
+	s.localVersion[device] = s.db.replace([]byte(s.folder), device[:], fs, s.size)
 	if len(fs) == 0 {
 		// Reset the local version if all files were removed.
 		s.localVersion[device] = 0
@@ -154,7 +163,7 @@ func (s *FileSet) Update(device protocol.DeviceID, fs []protocol.FileInfo) {
 		s.blockmap.Discard(discards)
 		s.blockmap.Update(updates)
 	}
-	if lv := s.db.updateFiles([]byte(s.folder), device[:], fs, &s.localSize, &s.globalSize); lv > s.localVersion[device] {
+	if lv := s.db.updateFiles([]byte(s.folder), device[:], fs, s.size); lv > s.localVersion[device] {
 		s.localVersion[device] = lv
 	}
 }
@@ -235,11 +244,11 @@ func (s *FileSet) LocalVersion(device protocol.DeviceID) int64 {
 }
 
 func (s *FileSet) LocalSize() (files, deleted int, bytes int64) {
-	return s.localSize.Size()
+	return s.size.local.Size()
 }
 
 func (s *FileSet) GlobalSize() (files, deleted int, bytes int64) {
-	return s.globalSize.Size()
+	return s.size.global.Size()
 }
 
 // DropFolder clears out all information related to the given folder from the
