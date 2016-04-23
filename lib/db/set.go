@@ -91,27 +91,37 @@ func (s *size) Size() (files, deleted int, bytes int64) {
 	return s.files, s.deleted, s.bytes
 }
 
+func (s *size) Sub(o *size) size {
+	af, ad, ab := s.Size()
+	of, od, ob := o.Size()
+	return size{
+		files:   af - of,
+		deleted: ad - od,
+		bytes:   ab - ob,
+	}
+}
+
 type sizeTracker struct {
-	local    size
-	global   size
-	needs    map[string]*size // device ID -> need size
-	needsMut stdsync.Mutex
+	local      size
+	global     size
+	insyncSize map[string]*size // device ID -> in sync size
+	insyncMut  stdsync.Mutex
 }
 
 func newSizeTracker() *sizeTracker {
 	return &sizeTracker{
-		needs: make(map[string]*size),
+		insyncSize: make(map[string]*size),
 	}
 }
 
-func (s *sizeTracker) need(device []byte) *size {
-	s.needsMut.Lock()
-	t, ok := s.needs[string(device)]
+func (s *sizeTracker) insync(device []byte) *size {
+	s.insyncMut.Lock()
+	t, ok := s.insyncSize[string(device)]
 	if !ok {
 		t = new(size)
-		s.needs[string(device)] = t
+		s.insyncSize[string(device)] = t
 	}
-	s.needsMut.Unlock()
+	s.insyncMut.Unlock()
 	return t
 }
 
@@ -266,8 +276,14 @@ func (s *FileSet) GlobalSize() (files, deleted int, bytes int64) {
 	return s.size.global.Size()
 }
 
+func (s *FileSet) InsyncSize(device protocol.DeviceID) (files, deleted int, bytes int64) {
+	return s.size.insync(device[:]).Size()
+}
+
 func (s *FileSet) NeedSize(device protocol.DeviceID) (files, deleted int, bytes int64) {
-	return s.size.need(device[:]).Size()
+	gf, gd, gb := s.size.global.Size()
+	sf, sd, sb := s.size.insync(device[:]).Size()
+	return gf - sf, gd - sd, gb - sb
 }
 
 // DropFolder clears out all information related to the given folder from the
