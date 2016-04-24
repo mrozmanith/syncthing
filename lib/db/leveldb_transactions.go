@@ -96,43 +96,31 @@ func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.
 		panic(err)
 	}
 
-	var fl versionList
-	var oldFile protocol.FileInfo
-	var hasOldFile bool
-	var currentVersion protocol.Vector
-	// Remove the device from the current version list
+	// We unmarshal the existing version list into oldVersionList and keep it
+	// unchanged, and make a copy into newVersionList that we'll later
+	// modify.
+	var newVersionList, oldVersionList versionList
 	if len(svl) != 0 {
-		err = fl.UnmarshalXDR(svl)
+		err = oldVersionList.UnmarshalXDR(svl)
 		if err != nil {
 			panic(err)
 		}
+		newVersionList.versions = make([]fileVersion, len(oldVersionList.versions))
+		copy(newVersionList.versions, oldVersionList.versions)
+	}
 
-		currentVersion = fl.versions[0].version
-
-		for i, f := range fl.versions {
-			if bytes.Equal(f.device, device) {
-				if f.version.Equal(file.Version) {
-					// No need to do anything
-					return false
-				}
-
-				if i == 0 {
-					// Keep the current newest file around so we can subtract it from
-					// the globalSize if we replace it.
-					oldFile, hasOldFile = t.getFile(folder, fl.versions[0].device, name)
-				}
-
-				if i > 0 && !f.version.Equal(currentVersion) {
-					// This device already has an entry in the list which is
-					// not the newest, so it is on their need size. Remove
-					// it from their need size.
-					of, _ := t.getFile(folder, device, name)
-					size.need(device).removeFile(of)
-				}
-
-				fl.versions = append(fl.versions[:i], fl.versions[i+1:]...)
-				break
+	// Remove the entry for the device from the new version list, so we can
+	// add the new entry.
+	for i := range newVersionList.versions {
+		if bytes.Equal(newVersionList.versions[i].device, device) {
+			if newVersionList.versions[i].version.Equal(file.Version) {
+				// No need to do anything, the version list already contains
+				// exactly the one we were going to add.
+				return false
 			}
+
+			newVersionList.versions = append(newVersionList.versions[:i], newVersionList.versions[i+1:]...)
+			break
 		}
 	}
 
@@ -141,16 +129,14 @@ func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.
 		version: file.Version,
 	}
 
-	insertedAt := -1
 	// Find a position in the list to insert this file. The file at the front
 	// of the list is the newer, the "global".
-	for i := range fl.versions {
-		switch fl.versions[i].version.Compare(file.Version) {
+	for i := range newVersionList.versions {
+		switch newVersionList.versions[i].version.Compare(file.Version) {
 		case protocol.Equal, protocol.Lesser:
 			// The version at this point in the list is equal to or lesser
 			// ("older") than us. We insert ourselves in front of it.
-			fl.versions = insertVersion(fl.versions, i, nv)
-			insertedAt = i
+			newVersionList.versions = insertVersion(newVersionList.versions, i, nv)
 			goto done
 
 		case protocol.ConcurrentLesser, protocol.ConcurrentGreater:
@@ -160,72 +146,87 @@ func (t readWriteTransaction) updateGlobal(folder, device []byte, file protocol.
 			// "Greater" in the condition above is just based on the device
 			// IDs in the version vector, which is not the only thing we use
 			// to determine the winner.)
-			of, ok := t.getFile(folder, fl.versions[i].device, name)
+			of, ok := t.getFile(folder, newVersionList.versions[i].device, name)
 			if !ok {
 				panic("file referenced in version list does not exist")
 			}
 			if file.WinsConflict(of) {
-				fl.versions = insertVersion(fl.versions, i, nv)
-				insertedAt = i
+				newVersionList.versions = insertVersion(newVersionList.versions, i, nv)
 				goto done
 			}
 		}
 	}
 
 	// We didn't find a position for an insert above, so append to the end.
-	fl.versions = append(fl.versions, nv)
-	insertedAt = len(fl.versions) - 1
+	newVersionList.versions = append(newVersionList.versions, nv)
 
 done:
-	if insertedAt == 0 {
-		// We just inserted a new newest version. Fixup the global size
-		// calculation.
-		if !file.Version.Equal(oldFile.Version) {
-			size.global.addFile(file)
-			if hasOldFile {
-				// We have the old file that was removed at the head of the list.
-				size.global.removeFile(oldFile)
-			} else if len(fl.versions) > 1 {
-				// The previous newest version is now at index 1, grab it from there.
-				oldFile, ok := t.getFile(folder, fl.versions[1].device, name)
-				if !ok {
-					panic("file referenced in version list does not exist")
-				}
-				size.global.removeFile(oldFile)
-			}
-		}
-	}
+	l.Debugf("new global after update: %v", newVersionList)
+	t.Put(gk, newVersionList.MustMarshalXDR())
 
-	if !file.Version.LesserEqual(currentVersion) { // file.Version > currentVersion
-		l.Debugln("checking", file)
-		for _, f := range fl.versions {
-			if f.version.Equal(currentVersion) {
-				// The files that were at the previous global version should
-				// now be on the need list instead.
-				of, _ := t.getFile(folder, f.device, name)
-				size.need(device).addFile(of)
-				l.Debugln("need add", of)
-			} else if f.version.LesserEqual(currentVersion) {
-				// The files which have lesser versions than the old global
-				// are already on the need list. We can stop here.
-				break
-			}
-		}
-	}
-
-	l.Debugf("new global after update: %v", fl)
-	t.Put(gk, fl.MustMarshalXDR())
-
+	t.updateGlobalSizeFixup(oldVersionList.versions, newVersionList.versions, folder, device, name, file, size)
 	return true
+}
+
+func (t readWriteTransaction) updateGlobalSizeFixup(oldV, newV []fileVersion, folder, device, name []byte, file protocol.FileInfo, size *sizeTracker) {
+	if len(oldV) == 0 {
+		// A new file was added. It's in sync by definition.
+		size.insync(device).addFile(file)
+		size.global.addFile(file)
+		return
+	}
+
+	oldGlobalVersion := oldV[0].version
+	newGlobalVersion := newV[0].version
+
+	if oldGlobalVersion.Equal(newGlobalVersion) {
+		// The global version didn't change. We just need to handle the
+		// thing that was added.
+		if oldGlobalVersion.Equal(file.Version) {
+			// The file that was added has the same version as the global
+			// version - it's in sync.
+			size.insync(device).addFile(file)
+		}
+		return
+	}
+
+	oldGlobal, ok := t.getFile(folder, oldV[0].device, name)
+	if !ok {
+		panic("replacing non-existant file")
+	}
+
+	// The files that were previously accounted as in sync are at the head
+	// of the old version list, with version == oldGlobalVersion. Deduct
+	// those sizes.
+	for _, v := range oldV {
+		if v.version.Equal(oldGlobalVersion) {
+			size.insync(v.device).removeFile(oldGlobal)
+		} else {
+			break
+		}
+	}
+
+	// The files that are now in sync are at the head of the new version
+	// list, with version == newGlobalVersion. Add those sizes.
+	for _, v := range newV {
+		if v.version.Equal(newGlobalVersion) {
+			size.insync(v.device).addFile(file)
+		} else {
+			break
+		}
+	}
+
+	size.global.removeFile(oldGlobal)
+	size.global.addFile(file)
 }
 
 // removeFromGlobal removes the device from the global version list for the
 // given file. If the version list is empty after this, the file entry is
 // removed entirely.
-func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, size *sizeTracker) {
-	l.Debugf("remove from global; folder=%q device=%v file=%q", folder, protocol.DeviceIDFromBytes(device), file)
+func (t readWriteTransaction) removeFromGlobal(folder, device, name []byte, size *sizeTracker) {
+	l.Debugf("remove from global; folder=%q device=%v name=%q", folder, protocol.DeviceIDFromBytes(device), name)
 
-	gk := t.db.globalKey(folder, file)
+	gk := t.db.globalKey(folder, name)
 	svl, err := t.Get(gk, nil)
 	if err != nil {
 		// We might be called to "remove" a global version that doesn't exist
@@ -233,69 +234,99 @@ func (t readWriteTransaction) removeFromGlobal(folder, device, file []byte, size
 		return
 	}
 
-	var fl versionList
-	err = fl.UnmarshalXDR(svl)
+	var oldVersions, newVersions versionList
+	err = oldVersions.UnmarshalXDR(svl)
 	if err != nil {
 		panic(err)
 	}
+	newVersions.versions = make([]fileVersion, len(oldVersions.versions))
+	copy(newVersions.versions, oldVersions.versions)
 
-	if len(fl.versions) == 0 {
-		// Early return if we have an empty list (nothing to remove).
-		t.Delete(gk)
-		return
-	}
-
-	currentHeadVersion := fl.versions[0].version
-	removed := false
-	for i, f := range fl.versions {
-		if bytes.Equal(f.device, device) {
-			if i == 0 && size != nil {
-				f, ok := t.getFile(folder, device, file)
-				if !ok {
-					panic("removing nonexistent file")
-				}
-				size.global.removeFile(f)
-				removed = true
-			}
-
-			if !f.version.GreaterEqual(currentHeadVersion) { // f.version < currentHeadVersion
-				// The file was previously on the need list, but we're
-				// removing it now.
-				f, _ := t.getFile(folder, device, file)
-				size.need(device).removeFile(f)
-			}
-
-			fl.versions = append(fl.versions[:i], fl.versions[i+1:]...)
+	for i := range newVersions.versions {
+		if bytes.Equal(newVersions.versions[i].device, device) {
+			newVersions.versions = append(newVersions.versions[:i], newVersions.versions[i+1:]...)
 			break
 		}
 	}
 
-	if len(fl.versions) == 0 {
+	if len(newVersions.versions) == 0 {
 		t.Delete(gk)
+	} else {
+		l.Debugf("new global after remove: %v", newVersions)
+		t.Put(gk, newVersions.MustMarshalXDR())
+	}
+
+	t.removeGlobalSizeFixup(oldVersions.versions, newVersions.versions, folder, device, name, size)
+}
+
+func (t readWriteTransaction) removeGlobalSizeFixup(oldV, newV []fileVersion, folder, device, name []byte, size *sizeTracker) {
+	if len(oldV) == 0 {
 		return
 	}
 
-	l.Debugf("new global after remove: %v", fl)
-	t.Put(gk, fl.MustMarshalXDR())
-	if removed {
-		f, ok := t.getFile(folder, fl.versions[0].device, file)
-		if !ok {
-			panic("new global is nonexistent file")
-		}
-		size.global.addFile(f)
+	// If we had one version previously, it was the global version.
+	// Account it as removed.
+	oldGlobal, ok := t.getFile(folder, oldV[0].device, name)
+	if !ok {
+		panic("replacing non-existant file")
 	}
 
-	newHeadVersion := fl.versions[0].version
-	if !newHeadVersion.Equal(currentHeadVersion) {
-		// The head version has changed. The files with the new head version
-		// were on the need list, but should not be any more.
-		for _, f := range fl.versions {
-			if f.version.Equal(newHeadVersion) {
-				f, _ := t.getFile(folder, f.device, file)
-				size.need(device).removeFile(f)
-			}
+	if len(newV) == 0 {
+		// The last version was removed.
+		size.insync(device).removeFile(oldGlobal)
+		size.global.removeFile(oldGlobal)
+		return
+	}
+
+	oldGlobalVersion := oldV[0].version
+	newGlobalVersion := newV[0].version
+
+	var removedVersion protocol.Vector
+	for _, v := range oldV {
+		if bytes.Equal(v.device, device) {
+			removedVersion = v.version
+			break
 		}
 	}
+
+	if oldGlobalVersion.Equal(newGlobalVersion) {
+		// The global version didn't change. We just need to handle the
+		// thing that was removed.
+		if oldGlobalVersion.Equal(removedVersion) {
+			// The file that was removed has the same version as the global
+			// version - it was in sync.
+			size.insync(device).removeFile(oldGlobal)
+		}
+		return
+	}
+
+	// The files that were previously accounted as in sync are at the head
+	// of the old version list, with version == oldGlobalVersion. Deduct
+	// those sizes.
+	for _, v := range oldV {
+		if v.version.Equal(oldGlobalVersion) {
+			size.insync(v.device).removeFile(oldGlobal)
+		} else {
+			break
+		}
+	}
+
+	// The files that are now in sync are at the head of the new version
+	// list, with version == newGlobalVersion. Add those sizes.
+	newGlobal, ok := t.getFile(folder, newV[0].device, name)
+	if !ok {
+		panic("promoting non-existant file")
+	}
+	for _, v := range newV {
+		if v.version.Equal(newGlobalVersion) {
+			size.insync(v.device).addFile(newGlobal)
+		} else {
+			break
+		}
+	}
+
+	size.global.removeFile(oldGlobal)
+	size.global.addFile(newGlobal)
 }
 
 func insertVersion(vl []fileVersion, i int, v fileVersion) []fileVersion {
