@@ -2205,6 +2205,12 @@ func (m *Model) CommitConfiguration(from, to config.Configuration) bool {
 	return true
 }
 
+// DropDeltaIndexIDs removes all index IDs from the database. This will
+// cause a full index transmission on the next connection.
+func (m *Model) DropDeltaIndexIDs() {
+	m.db.DropDeltaIndexIDs()
+}
+
 // mapFolders returns a map of folder ID to folder configuration for the given
 // slice of folder configurations.
 func mapFolders(folders []config.FolderConfiguration) map[string]config.FolderConfiguration {

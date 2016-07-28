@@ -93,6 +93,7 @@ type modelIntf interface {
 	CurrentLocalVersion(folder string) (int64, bool)
 	RemoteLocalVersion(folder string) (int64, bool)
 	State(folder string) (string, time.Time, error)
+	DropDeltaIndexIDs()
 }
 
 type configIntf interface {
@@ -270,6 +271,7 @@ func (s *apiService) Serve() {
 	// Debug endpoints, not for general use
 	getRestMux.HandleFunc("/rest/debug/peerCompletion", s.getPeerCompletion)
 	getRestMux.HandleFunc("/rest/debug/httpmetrics", s.getSystemHTTPMetrics)
+	postRestMux.HandleFunc("/rest/debug/dropdeltas", s.postDropDeltas)
 
 	// A handler that splits requests between the two above and disables
 	// caching
@@ -1163,6 +1165,10 @@ func (s *apiService) getSystemBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSON(w, ret)
+}
+
+func (s *apiService) postDropDeltas(w http.ResponseWriter, r *http.Request) {
+	s.model.DropDeltaIndexIDs()
 }
 
 func (s *apiService) toNeedSlice(fs []db.FileInfoTruncated) []jsonDBFileInfo {
